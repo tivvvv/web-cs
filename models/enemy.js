@@ -2,16 +2,25 @@
 // 主程序提供玩家状态 player, 视点 eye(), 碰撞移动 move() 和视线判断 visible().
 // 射击使用 shoot(), 特效使用 effect(), 首次死亡时调用 killed() 记录击杀.
 FPS.models.enemy = (() => {
-  let geometry, armor, joints, visor, weapon;
+  let geometry, armor, joints, visor, weapon, debugMaterial, bodyGeometry, bodyMaterial;
   return (T, o = {}) => {
     geometry ||= new T.BoxGeometry(1, 1, 1);
     armor ||= new T.MeshStandardMaterial({ color: 0xc7b79a, roughness: .75, metalness: .2 });
     joints ||= new T.MeshStandardMaterial({ color: 0x263d38, roughness: .8 });
     visor ||= new T.MeshStandardMaterial({ color: 0xff673d, emissive: 0xf04419, emissiveIntensity: 1.5, roughness: .4 });
     weapon ||= new T.MeshStandardMaterial({ color: 0x192a26, metalness: .65, roughness: .4 });
+    debugMaterial ||= new T.MeshBasicMaterial({ color: 0xffb86b, wireframe: true, depthTest: false, depthWrite: false, toneMapped: false });
     const root = new T.Group(), torso = new T.Group(); root.add(torso);
+    const debugMeshes = [];
+    // 主程序按布局中的物理尺寸缩放和定位, 独立于四肢动画, 不参与射击命中.
+    bodyGeometry ||= new T.CylinderGeometry(1, 1, 1, 16, 1, true);
+    bodyMaterial ||= new T.MeshBasicMaterial({ color: 0x64d7ee, wireframe: true, depthTest: false, depthWrite: false, toneMapped: false });
+    const bodyWire = new T.Mesh(bodyGeometry, bodyMaterial); bodyWire.visible = false; bodyWire.renderOrder = 999; bodyWire.raycast = () => {};
     const box = (parent, size, pos, mat) => {
       const m = new T.Mesh(geometry, mat); m.scale.set(...size); m.position.set(...pos);
+      // 复用命中网格的几何体, 作为子节点自动继承关节动画和缩放, 显隐由主程序控制.
+      const wire = new T.Mesh(geometry, debugMaterial); wire.visible = false; wire.renderOrder = 998;
+      wire.raycast = () => {}; m.add(wire); debugMeshes.push(wire);
       m.castShadow = m.receiveShadow = true; parent.add(m); return m;
     };
     box(torso, [.64, .58, .34], [0, 1.22, 0], armor);
@@ -36,11 +45,11 @@ FPS.models.enemy = (() => {
     box(gun, [.055, .055, .25], [0, .01, .37], weapon);
     const muzzle = new T.Object3D(); muzzle.position.set(0, .01, .52); gun.add(muzzle);
     let phase = 0, cooldown = 1.2 + Math.random(), recoil = 0, death = 0, stuck = 0;
-    const actor = { root, muzzle, health: o.health || 100, alive: true, state: 'approach', shots: 0,
+    const actor = { root, muzzle, debugMeshes, bodyWire, health: o.health || 100, alive: true, state: 'approach', shots: 0,
       damage(amount, api) {
         if (!actor.alive) return;
         actor.health = Math.max(0, actor.health - amount); recoil = .5;
-        if (!actor.health) { actor.alive = false; actor.state = 'dead'; api.killed(actor); }
+        if (!actor.health) { actor.alive = false; bodyWire.visible = false; debugMeshes.forEach(w => w.visible = false); actor.state = 'dead'; api.killed(actor); }
       },
       update(dt, api) {
         if (!actor.alive) {

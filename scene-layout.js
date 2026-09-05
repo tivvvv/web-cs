@@ -30,12 +30,12 @@ window.FPS_LAYOUT = {
     { id: 'cover-left', model: 'barrier', position: [-3, 0, -7], rotation: [0, 0, 0], scale: [1.2, 1, 1], collision: { enabled: true, boxes: [{ size: [3.6, .35, 1.1], offset: [0, .175, 0] }, { size: [3.5, .9, .72], offset: [0, .8, 0] }, { size: [3.6, .15, .82], offset: [0, 1.325, 0] }] } },
     { id: 'cover-right', model: 'barrier', position: [17, 0, 6], rotation: [0, Math.PI / 2, 0], scale: [1, 1, 1], collision: { enabled: true, boxes: [{ size: [3.6, .35, 1.1], offset: [0, .175, 0] }, { size: [3.5, .9, .72], offset: [0, .8, 0] }, { size: [3.6, .15, .82], offset: [0, 1.325, 0] }] } },
     { id: 'cover-back', model: 'barrier', position: [4, 0, -23], rotation: [0, 0, 0], scale: [1.5, 1, 1], collision: { enabled: true, boxes: [{ size: [3.6, .35, 1.1], offset: [0, .175, 0] }, { size: [3.5, .9, .72], offset: [0, .8, 0] }, { size: [3.6, .15, .82], offset: [0, 1.325, 0] }] } },
-    { id: 'e1', model: 'enemy', position: [-3, 0, -2], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false }, options: { speed: 1.8, fireInterval: 1.2 } },
-    { id: 'e2', model: 'enemy', position: [8, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false } },
-    { id: 'e3', model: 'enemy', position: [-15, 0, -10], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false } },
-    { id: 'e4', model: 'enemy', position: [3, 0, -17], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false } },
-    { id: 'e5', model: 'enemy', position: [17, 0, -18], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false } },
-    { id: 'e6', model: 'enemy', position: [-17, 0, 4], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false, }, options: { fireInterval: 1.4 } },
+    { id: 'e1', model: 'enemy', position: [-3, 0, -2], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 }, options: { speed: 1.8, fireInterval: 1.2 } },
+    { id: 'e2', model: 'enemy', position: [8, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 } },
+    { id: 'e3', model: 'enemy', position: [-15, 0, -10], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 } },
+    { id: 'e4', model: 'enemy', position: [3, 0, -17], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 } },
+    { id: 'e5', model: 'enemy', position: [17, 0, -18], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 } },
+    { id: 'e6', model: 'enemy', position: [-17, 0, 4], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 }, options: { fireInterval: 1.4 } },
     { id: 'view-rifle', model: 'rifle', attach: 'camera', position: [.3, -.3, -.65], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false } }
   ]
 };

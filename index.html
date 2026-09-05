@@ -222,7 +222,7 @@ h1{font-size:62px;margin-top:16px}
 </details>
 <script>
 'use strict';
-// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, damage?, alive?, muzzle?}.
+// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, damage?, alive?, muzzle?, debugMeshes?, bodyWire?}.
 // 隔离可选模块的回调异常. 主程序统一维护唯一主循环和通用游戏规则.
 window.FPS = { models: Object.create(null) };
 const $ = id => document.getElementById(id), failures = new Set();
@@ -245,10 +245,11 @@ function load(path) {
   });
 }
 let T, renderer, scene, camera, layout, weapon, api, solid = [], actors = [], entries = [], effects = [], helpers = [];
-let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0, vy = 0, grounded = false;
+let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0;
 let ammo = 30, reloadLeft = 0, cooldown = 0, recoil = 0, hurt = 0, hit = 0, toastLeft = 0, walk = 0, fps = 60;
 let firing = false, dragging = false, muted = false, audio, last = 0, hudElapsed = 0;
 const keys = new Set(), player = { position: null, health: 100, debug: false };
+player.body = { root: player, radius: .32, height: 1.75, vy: 0, grounded: false };
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const tuple = (a, fallback) => a === undefined ? fallback : Array.isArray(a) && a.length === 3 && a.every(Number.isFinite) ? a : (() => { throw Error('必须提供三个有限数值'); })();
 function tell(message) { $('toast').textContent = message; toastLeft = 3; $('toast').style.opacity = 1; }
@@ -261,22 +262,81 @@ function footprint(p, radius, b) {
 function overlaps(p, radius, height, b) {
   return p.y < b.max.y - .025 && p.y + height > b.min.y + .025 && footprint(p, radius, b);
 }
-// 布局碰撞盒与角色圆形截面相交时, 细分最后一步直到接触位置.
-function move(root, dx, dz, radius = .32, height = 1.75) {
+// 活着且可用的动态身体参与实体阻挡, 调试飞行的玩家不参与碰撞.
+function physicalBodies(exclude) {
+  const list = actors.filter(a => a.alive && !a.disabled && a.body).map(a => a.body);
+  if (!player.debug) list.push(player.body);
+  return list.filter(b => b.root !== exclude);
+}
+function bodiesOverlap(p, radius, height, b) {
+  const q = b.root.position;
+  return p.y < q.y + b.height - .025 && p.y + height > q.y + .025 &&
+    (p.x - q.x) ** 2 + (p.z - q.z) ** 2 < (radius + b.radius) ** 2;
+}
+function blockedAt(p, radius, height, others) {
+  return solid.some(s => overlaps(p, radius, height, s.box)) || others.some(b => bodiesOverlap(p, radius, height, b));
+}
+// 静态障碍和动态身体共用贴边移动, 小步进避免高速移动穿过身体.
+function move(root, dx, dz, radius = .32, height = 1.75, ignore) {
+  const body = root === player ? player.body : root.userData?.actor?.body;
+  if (body) { radius = body.radius; height = body.height; }
+  const others = physicalBodies(root).filter(b => b.root !== ignore);
   const p = root.position, start = p.clone(), steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / .15));
   for (let i = 0; i < steps; i++) for (const [axis, d] of [['x', dx / steps], ['z', dz / steps]]) {
     if (!d) continue;
     const origin = p[axis]; p[axis] = origin + d;
-    if (solid.some(s => overlaps(p, radius, height, s.box))) {
+    if (blockedAt(p, radius, height, others)) {
       let safe = 0, blocked = 1;
       for (let n = 0; n < 8; n++) {
         const fraction = (safe + blocked) / 2; p[axis] = origin + d * fraction;
-        if (solid.some(s => overlaps(p, radius, height, s.box))) blocked = fraction; else safe = fraction;
+        if (blockedAt(p, radius, height, others)) blocked = fraction; else safe = fraction;
       }
       p[axis] = origin + d * safe;
     }
   }
   return p.distanceTo(start);
+}
+// 竖直扫掠同时处理地面, 顶部障碍和其他身体, 玩家与敌人共享重力规则.
+function fall(body, dt) {
+  const p = body.root.position, oldY = p.y;
+  body.vy -= 18 * dt;
+  const nextY = oldY + body.vy * dt; let next = nextY, landed = false, ceiling = false;
+  const surface = (bottom, top) => {
+    if (body.vy <= 0 && oldY >= top - .035 && nextY <= top) { next = Math.max(next, top); landed = true; }
+    else if (body.vy > 0 && oldY + body.height <= bottom + .035 && nextY + body.height >= bottom) { next = Math.min(next, bottom - body.height); ceiling = true; }
+  };
+  for (const { box } of solid) if (footprint(p, body.radius, box)) surface(box.min.y, box.max.y);
+  for (const other of physicalBodies(body.root)) {
+    const q = other.root.position;
+    if ((p.x - q.x) ** 2 + (p.z - q.z) ** 2 < (body.radius + other.radius) ** 2) surface(q.y, q.y + other.height);
+  }
+  p.y = next; body.grounded = landed;
+  if (landed || ceiling) body.vy = 0;
+  if (p.y < -15) { p.copy(body.spawn || api.spawn); body.vy = 0; body.grounded = false; }
+}
+// 修复出生点重叠或落地挤入的情况, 分离过程中仍检查墙体和第三个身体.
+function separateBodies() {
+  const list = physicalBodies();
+  for (let pass = 0; pass < 3; pass++) for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+    const a = list[i], b = list[j], p = a.root.position, q = b.root.position;
+    if (!bodiesOverlap(p, a.radius, a.height, b)) continue;
+    const dx = q.x - p.x, dz = q.z - p.z, distance = Math.hypot(dx, dz);
+    const nx = distance > .0001 ? dx / distance : 1, nz = distance > .0001 ? dz / distance : 0;
+    const gap = a.radius + b.radius - distance + .001;
+    move(a.root, -nx * gap / 2, -nz * gap / 2, a.radius, a.height, b.root);
+    const rest = () => Math.max(0, a.radius + b.radius - Math.hypot(q.x - p.x, q.z - p.z) + .001);
+    let remaining = rest(); move(b.root, nx * remaining, nz * remaining, b.radius, b.height, a.root);
+    remaining = rest(); move(a.root, -nx * remaining, -nz * remaining, a.radius, a.height, b.root);
+  }
+}
+function updateBodyWireframes() {
+  for (const a of actors) if (a.bodyWire) {
+    a.bodyWire.visible = player.debug && a.alive && !a.disabled && !!a.body;
+    if (!a.bodyWire.visible) continue;
+    const b = a.body;
+    a.bodyWire.position.copy(b.root.position); a.bodyWire.position.y += b.height / 2;
+    a.bodyWire.scale.set(b.radius, b.height, b.radius);
+  }
 }
 function visible(from, to) {
   const ray = new T.Raycaster(from, to.clone().sub(from).normalize(), .03, from.distanceTo(to));
@@ -355,7 +415,13 @@ function createInstance(data) {
   const position = tuple(data.position, [0, 0, 0]), rotation = tuple(data.rotation, [0, 0, 0]), scale = tuple(data.scale, [1, 1, 1]);
   if (scale.some(x => x <= 0)) throw Error('缩放必须大于零');
   const boxes = [];
-  if (data.collision?.enabled) {
+  let body;
+  if (data.collision?.enabled && data.collision.dynamic) {
+    const { radius, height } = data.collision;
+    if (![radius, height].every(n => Number.isFinite(n) && n > 0)) throw Error('动态身体半径和高度必须为正数');
+    if (data.attach) throw Error('动态身体必须挂载到场景');
+    body = { radius: radius * Math.max(scale[0], scale[2]), height: height * scale[1], vy: 0, grounded: false };
+  } else if (data.collision?.enabled) {
     const parts = data.collision.boxes ?? [data.collision];
     if (!Array.isArray(parts) || !parts.length) throw Error('碰撞盒列表必须为非空数组');
     for (const part of parts) {
@@ -369,8 +435,13 @@ function createInstance(data) {
   const instance = factory(T, data.options || {}); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
   for (const callback of ['update', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
   if (instance.muzzle !== undefined && !instance.muzzle?.isObject3D) throw Error('枪口必须为 Object3D');
+  if (body && typeof instance.damage !== 'function') throw Error('动态身体需要角色伤害接口');
+  if (instance.bodyWire !== undefined && !instance.bodyWire?.isObject3D) throw Error('身体线框必须为 Object3D');
+  if (instance.debugMeshes !== undefined && (!Array.isArray(instance.debugMeshes) || instance.debugMeshes.some(n => !n?.isObject3D))) throw Error('调试网格必须为 Object3D 数组');
   const root = instance.root; root.position.set(...position); root.rotation.set(...rotation); root.scale.set(...scale);
   root.name = data.id; instance.id = data.id; instance.data = data;
+  if (body) { body.root = root; body.spawn = root.position.clone(); instance.body = body; }
+  if (instance.bodyWire) { instance.bodyWire.visible = false; scene.add(instance.bodyWire); }
   (data.attach === 'camera' ? camera : scene).add(root); root.updateWorldMatrix(true, true);
   for (const box of boxes) solid.push({ root, box: box.applyMatrix4(root.matrixWorld), id: data.id });
   if (typeof instance.damage === 'function') { root.userData.actor = instance; actors.push(instance); }
@@ -383,15 +454,19 @@ function toggleDebug() {
     if (!solid.length) { tell('场景无可用碰撞体, 保持自由飞行'); return; }
     const p = player.position;
     const supported = solid.some(s => s.box.max.y <= p.y + .035 && footprint(p, .32, s.box));
-    if (!supported || solid.some(s => overlaps(p, .32, 1.75, s.box))) p.copy(api.spawn);
+    if (!supported || blockedAt(p, player.body.radius, player.body.height, physicalBodies(player))) p.copy(api.spawn);
   }
-  player.debug = !player.debug; vy = 0; grounded = false; firing = false;
+  player.debug = !player.debug; player.body.vy = 0; player.body.grounded = false; firing = false;
+  if (!player.debug) separateBodies();
   document.body.dataset.debug = player.debug; if (weapon) weapon.root.visible = !player.debug && !weapon.disabled;
   syncCollisionWireframes();
   tell(player.debug ? '自由飞行 · 碰撞线框已显示 · B 返回正常模式' : '已恢复重力和正常交战');
 }
 function syncCollisionWireframes() {
   for (const h of helpers) dispose(h); helpers = [];
+  // 角色使用模型网格判定命中, 不在静态碰撞列表中, 需同步其独立线框.
+  for (const e of entries) for (const wire of e.debugMeshes || []) wire.visible = player.debug && !e.disabled && e.alive !== false;
+  updateBodyWireframes();
   if (!player.debug) return;
   for (const s of solid) {
     const h = new T.Box3Helper(s.box, 0xbbe48d);
@@ -411,17 +486,8 @@ function updatePlayer(dt) {
   if (player.debug) player.position.add(delta);
   else {
     move(player, delta.x, delta.z);
-    if (keys.has('Space') && grounded) { vy = 6.1; grounded = false; }
-    vy -= 18 * dt; const oldY = player.position.y, nextY = oldY + vy * dt; let next = nextY;
-    grounded = false;
-    for (const { box: b } of solid) {
-      const p = player.position;
-      if (!footprint(p, .32, b)) continue;
-      if (vy <= 0 && oldY >= b.max.y - .035 && nextY <= b.max.y) { next = Math.max(next, b.max.y); grounded = true; }
-      else if (vy > 0 && oldY + 1.75 <= b.min.y + .035 && nextY + 1.75 >= b.min.y) { next = Math.min(next, b.min.y - 1.75); vy = 0; }
-    }
-    player.position.y = next; if (grounded) vy = 0;
-    if (next < -15) { player.position.copy(api.spawn); vy = 0; tell('已返回出生点'); }
+    if (keys.has('Space') && player.body.grounded) { player.body.vy = 6.1; player.body.grounded = false; }
+    fall(player.body, dt);
   }
   camera.position.copy(eye()); camera.rotation.set(pitch, yaw, 0, 'YXZ'); camera.updateMatrixWorld(true);
 }
@@ -479,7 +545,7 @@ function updateHUD() {
   $('objective').textContent = `${kills} / ${total}`; $('clock').textContent = formatTime(time);
   const heading = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
   $('compass').textContent = `· ${['N', 'E', 'S', 'W'][Math.round(heading / 90) % 4]} · ${Math.round(heading).toString().padStart(3, '0')} ·`;
-  $('debug').textContent = `DEBUG / FREE FLIGHT\nFPS ${fps.toFixed(0)}  DRAW ${renderer.info.render.calls}\nXYZ ${player.position.toArray().map(n => n.toFixed(2)).join(' / ')}\nYAW ${heading.toFixed(1)}  PITCH ${(pitch * 180 / Math.PI).toFixed(1)}\nWASD 镜头方向 · SPACE / CTRL 升降\nSHIFT 加速 · B 退出 · 碰撞线框已显示\n玩家碰撞半径 0.32 m\n模块 ${Object.keys(FPS.models).length}  异常 ${failures.size}`;
+  $('debug').textContent = `DEBUG / FREE FLIGHT\nFPS ${fps.toFixed(0)}  DRAW ${renderer.info.render.calls}\nXYZ ${player.position.toArray().map(n => n.toFixed(2)).join(' / ')}\nYAW ${heading.toFixed(1)}  PITCH ${(pitch * 180 / Math.PI).toFixed(1)}\nWASD 镜头方向 · SPACE / CTRL 升降\nSHIFT 加速 · B 退出 · 碰撞线框已显示\n玩家碰撞半径 0.32 m\n绿 静态 / 青 身体 / 橙 命中\n模块 ${Object.keys(FPS.models).length}  异常 ${failures.size}`;
   drawMap();
 }
 function frame(stamp) {
@@ -489,19 +555,24 @@ function frame(stamp) {
     if (reloadLeft > 0) { reloadLeft = Math.max(0, reloadLeft - dt); if (!reloadLeft) { ammo = 30; tone(350, .07); } }
     updatePlayer(dt); if (firing) playerFire();
     scene.updateMatrixWorld(true);
-    for (const e of entries) if (e.update && !e.disabled) {
-      try { e.update(dt, e === weapon ? { time, walk, recoil, reload: reloadLeft > 0 ? Math.sin(reloadLeft / 1.65 * Math.PI) : 0 } : api); }
+    for (const e of entries) if ((e.update || e.body) && !e.disabled) {
+      try {
+        if (e.body && e.alive) fall(e.body, dt);
+        e.update?.(dt, e === weapon ? { time, walk, recoil, reload: reloadLeft > 0 ? Math.sin(reloadLeft / 1.65 * Math.PI) : 0 } : api);
+      }
       catch (error) {
         e.disabled = true; e.root.visible = false; report(e.id + ' 更新', error);
         solid = solid.filter(s => s.root !== e.root); syncCollisionWireframes(); if (e.alive) { e.alive = false; total--; }
       }
     }
+    separateBodies(); camera.position.copy(eye());
     if (total > 0 && kills >= total && mode === 'playing') finish(true);
   }
   for (let i = effects.length - 1; i >= 0; i--) { effects[i].left -= dt; if (effects[i].left <= 0) { dispose(effects[i].root); effects.splice(i, 1); } }
   api.flash.intensity *= Math.exp(-dt * 50); hurt = Math.max(0, hurt - dt * 1.6); hit = Math.max(0, hit - dt); toastLeft -= dt;
   $('damage').style.opacity = hurt; $('crosshair').classList.toggle('hit', hit > 0); if (toastLeft <= 0) $('toast').style.opacity = 0;
   hudElapsed += dt; if (hudElapsed > .1) { updateHUD(); hudElapsed = 0; }
+  updateBodyWireframes();
   renderer.render(scene, camera);
   // 绘制第一人称武器前仅清除深度, 避免穿墙并保留武器自身的遮挡关系.
   if (weapon?.root.visible) {
