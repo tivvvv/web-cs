@@ -27,7 +27,8 @@ FPS.models.rifle = (T) => {
   box([.1, .12, .3], [-.07, -.1, -.48], tan, -.18);
   const muzzle = new T.Object3D(); muzzle.position.set(0, .015, -1.14); body.add(muzzle);
   return { root, muzzle, update(dt, s) {
-    body.position.set(Math.sin(s.time * 9) * s.walk * .008, Math.abs(Math.cos(s.time * 9)) * s.walk * .012 - s.reload * .25, s.recoil * .07);
-    body.rotation.set(s.recoil * .06 - s.reload * .65, 0, s.reload * -.35);
+    // 枪身后移并抬起枪口, 叠加轻微侧倾, 主程序的弹簧参数负责平滑复位.
+    body.position.set(Math.sin(s.time * 9) * s.walk * .008, Math.abs(Math.cos(s.time * 9)) * s.walk * .012 + s.recoil * .025 - s.reload * .25, s.recoil * .12);
+    body.rotation.set(s.recoil * .12 - s.reload * .65, s.recoil * .012, s.reload * -.35 - s.recoil * .025);
   } };
 };

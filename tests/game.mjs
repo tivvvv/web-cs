@@ -40,7 +40,7 @@ try {
   const page = await open();
   await check('offline file:// startup, independent models and scene instances', async () => {
     const s = await page.evaluate(() => { const s = FPS.inspect(); return { ready: s.ready, errors: s.failures, actors: s.total, models: Object.keys(FPS.models).length, debug: s.player.debug }; });
-    assert.equal(s.ready, true); assert.deepEqual(s.errors, []); assert.equal(s.actors, 6); assert.equal(s.models, 8); assert.equal(s.debug, false);
+    assert.equal(s.ready, true); assert.deepEqual(s.errors, []); assert.equal(s.actors, 6); assert.equal(s.models, 9); assert.equal(s.debug, false);
     const east = await page.evaluate(() => { const b = FPS.inspect().solid.find(s => s.id === 'east').box; return { minX: b.min.x, maxZ: b.max.z }; });
     assert(Math.abs(east.minX - 26) < .001); assert(Math.abs(east.maxZ - 30) < .001);
     await mkdir(join(root, 'artifacts'), { recursive: true }); await page.screenshot({ path: join(root, 'artifacts/menu.png') });
