@@ -1,0 +1,14 @@
+# 项目源码统一使用 UTF-8, LF 换行和两个空格缩进.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# 第三方生成依赖和许可证保持原文.
+[vendor/**]
+trim_trailing_whitespace = false

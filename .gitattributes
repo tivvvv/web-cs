@@ -1,0 +1,4 @@
+* text=auto eol=lf
+
+# 上游生成的着色器字符串包含空白, 保留原文并省略依赖文件的文本差异.
+vendor/three.min.js -diff

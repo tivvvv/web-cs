@@ -1,0 +1,8 @@
+{
+  "name": "zero-line-fps",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Offline file:// Three.js FPS. No installation required to play.",
+  "scripts": { "build:vendor": "node tools/build-vendor.mjs", "test": "node tests/game.mjs" },
+  "devDependencies": { "esbuild": "0.25.10", "playwright-core": "1.55.1", "three": "0.180.0" }
+}

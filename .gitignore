@@ -1,0 +1,24 @@
+# 本地依赖和开发输出.
+node_modules/
+artifacts/
+coverage/
+playwright-report/
+test-results/
+*.log
+
+# 本地配置和凭据, 允许提交不包含敏感值的示例配置.
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# 操作系统和编辑器临时文件.
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# vendor 中的运行依赖必须提交, 确保双击 HTML 可以离线运行.

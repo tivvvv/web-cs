@@ -1,0 +1,566 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>零界 ZERO LINE · 第一人称训练场</title>
+<style>
+:root{color-scheme:dark;--paper:#e9eddc;--muted:#a6b8ac;--accent:#e9b65e;--ink:#10251f;--line:#e8f0d92a}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#253c34;color:var(--paper);font-family:Arial,"PingFang SC","Microsoft YaHei",sans-serif}
+button{font:inherit;cursor:pointer}
+button:focus-visible{outline:2px solid #fff;outline-offset:5px}
+canvas#world{position:fixed;inset:0;width:100%;height:100%;display:block}
+.shade{position:fixed;inset:0;background:linear-gradient(90deg,#0b211eed,#10261e9c 38%,#10251b00 72%),linear-gradient(0deg,#10251e9c,transparent 27%);pointer-events:none;transition:opacity .5s}
+body[data-playing="true"] .shade{opacity:0}
+.top{position:fixed;z-index:2;text-shadow:0 1px 5px #17382b99;top:30px;left:36px;right:36px;display:flex;align-items:center;justify-content:space-between;pointer-events:none}
+.brand{display:flex;align-items:center;gap:12px}
+.mark{width:34px;height:34px;border:1px solid #d7e6ce77;display:grid;place-items:center;font:26px monospace;transform:rotate(45deg)}
+.mark span{transform:rotate(-45deg)}
+.wordmark{font-size:15px;font-weight:800;letter-spacing:3px}
+.subbrand{font:9px monospace;letter-spacing:2px;color:var(--muted);margin-top:5px}
+.status{font:10px monospace;letter-spacing:1px;display:flex;align-items:center;gap:9px}
+.dot{width:6px;height:6px;border-radius:50%;background:#cce99c;box-shadow:0 0 9px #d4f6a055}
+.sound{pointer-events:auto;margin-left:18px;background:transparent;color:var(--paper);border:1px solid var(--line);padding:9px 12px;font:10px monospace}
+.menu{position:fixed;left:8%;top:50%;transform:translateY(-46%);max-width:510px;width:43%}
+.eyebrow{font:11px monospace;letter-spacing:3px;color:var(--accent);display:flex;align-items:center;gap:14px}
+.eyebrow:before{content:"";width:28px;height:1px;background:var(--accent)}
+h1{font-size:clamp(68px,8vw,116px);font-weight:600;letter-spacing:10px;line-height:1.05;margin:27px 0 12px}
+.english{font-size:clamp(22px,3vw,40px);letter-spacing:9px;font-weight:300;margin-bottom:26px}
+.description{font-size:13px;line-height:2;color:#b8c8ba;max-width:345px;margin-bottom:30px}
+.briefing{display:flex;gap:32px;border-top:1px solid var(--line);padding:20px 0 24px;max-width:360px}
+.briefing strong{font:21px monospace;color:#e9ecdc}
+.briefing small{display:block;font-size:10px;color:var(--muted);margin-top:7px;letter-spacing:1px}
+#start{display:flex;align-items:center;justify-content:space-between;width:310px;padding:19px 24px;background:var(--accent);border:0;color:#17281e;font-size:14px;font-weight:700;letter-spacing:2px;transition:background .2s,transform .2s}
+#start:hover{background:#f8ca7b;transform:translateX(3px)}
+#start:disabled{opacity:.5;cursor:wait}
+.start-note{margin-top:13px;font-size:10px;color:#a5b8a8}
+.footer{position:fixed;left:36px;right:36px;bottom:28px;display:flex;align-items:center;justify-content:space-between;gap:20px;font:10px monospace;color:#c9d5c7;letter-spacing:1px}
+.controls{display:flex;gap:20px}
+.controls span{white-space:nowrap}
+kbd{font:10px monospace;color:#f2f2df;border:1px solid #c4d5c449;padding:4px 6px;margin-right:6px}
+.coordinates{text-align:right;font:10px monospace;line-height:1.8;letter-spacing:2px}
+.scene-label{position:fixed;right:8%;bottom:20%;border-left:2px solid var(--accent);padding-left:15px;text-shadow:0 2px 12px #193424}
+.scene-label b{font:36px monospace}
+.scene-label span{display:block;font-size:10px;letter-spacing:3px;margin-top:7px}
+.hud{display:none;pointer-events:none}
+body[data-playing="true"] .hud{display:block}
+body[data-playing="true"] .menu,body[data-playing="true"] .scene-label,body[data-playing="true"] .footer{display:none}
+.hud:before{content:"";position:fixed;inset:0;pointer-events:none;background:linear-gradient(180deg,#10261b77,transparent 17%,transparent 82%,#10261b55)}
+.compass{position:fixed;top:31px;left:50%;transform:translateX(-50%);width:260px;text-align:center;font:11px monospace;letter-spacing:6px;text-shadow:0 1px 4px #000}
+.compass:after{content:"";display:block;margin:9px auto;width:1px;height:12px;background:var(--accent)}
+.mission{position:fixed;top:103px;left:36px;background:#102b237f;border-left:2px solid var(--accent);padding:12px 18px;backdrop-filter:blur(8px)}
+.mission small{font:9px monospace;letter-spacing:2px;color:var(--accent)}
+.mission p{font-size:13px;letter-spacing:1px;margin:8px 0 0}
+.radar{position:fixed;right:36px;top:96px;width:168px;border:1px solid var(--line);background:#102a2488;backdrop-filter:blur(8px)}
+#map{display:block;width:166px;height:166px}
+.radar-label{padding:9px 11px;border-top:1px solid var(--line);font:9px monospace;letter-spacing:2px;display:flex;justify-content:space-between}
+.health{position:fixed;left:36px;bottom:42px;min-width:220px;text-shadow:0 2px 8px #10261f}
+.micro{font:9px monospace;letter-spacing:2px;color:#dae3d4}
+.health .value{font:38px monospace;margin:8px 0 12px;display:flex;align-items:center;gap:14px}
+.health .value span:first-child{font:25px monospace;color:var(--accent)}
+.healthbar{height:4px;width:200px;background:#142a227f}
+.healthbar i{display:block;width:100%;height:100%;background:#dae3c9;transition:width .1s}
+.ammo{position:fixed;right:36px;bottom:38px;text-align:right;text-shadow:0 2px 8px #10261f}
+.ammo-number{font:54px monospace;line-height:1.3}
+.ammo-number small{font:19px monospace;color:#ced9c7}
+.weapon-line{font:10px monospace;letter-spacing:2px;margin-top:8px}
+.hud-help{position:fixed;bottom:35px;left:50%;transform:translateX(-50%);font-size:10px;color:#dae3d1;letter-spacing:1px;text-shadow:0 1px 3px #000}
+.crosshair{position:fixed;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%);filter:drop-shadow(0 0 2px #23392c)}
+.crosshair:before,.crosshair:after{content:"";position:absolute;background:#f4f0d9}
+.crosshair:before{width:2px;height:16px;left:11px;top:4px}
+.crosshair:after{height:2px;width:16px;left:4px;top:11px}
+.crosshair.hit{transform:translate(-50%,-50%) rotate(45deg);filter:drop-shadow(0 0 3px #f99d46)}
+.crosshair.hit:before,.crosshair.hit:after{background:var(--accent)}
+#damage{position:fixed;inset:0;box-shadow:inset 0 0 160px 35px #c13220;pointer-events:none;opacity:0}
+#toast{position:fixed;left:50%;top:72%;transform:translateX(-50%);background:#102b24cb;padding:12px 22px;border-left:2px solid var(--accent);font-size:12px;opacity:0;pointer-events:none;transition:opacity .15s}
+#debug{position:fixed;left:36px;top:184px;white-space:pre;font:11px/1.8 monospace;color:#d9efbe;background:#122c24d9;padding:14px;border:1px solid #a9d67466;display:none;pointer-events:none}
+#faults{position:fixed;top:96px;right:36px;max-width:440px;width:calc(100% - 72px);background:#331d16ed;color:#ffe0c1;border:1px solid #f4a36388;font-size:11px;z-index:10;display:none;padding:10px 14px}
+#faults summary{cursor:pointer;font-weight:700}
+#fault-list{max-height:180px;overflow:auto;padding:8px 0;line-height:1.7;overflow-wrap:anywhere}
+#faults button{background:transparent;color:#ffcf9f;border:1px solid #986c46;padding:5px 10px;font-size:11px}
+body[data-debug="true"] #debug{display:block}
+body[data-debug="true"] .crosshair{opacity:.4}
+@media(max-width:850px){.menu{left:6%;width:65%;max-width:410px}
+.scene-label{right:5%;bottom:25%}
+.top,.footer{left:20px;right:20px}
+.compass{display:none}
+.controls{gap:10px;font-size:9px}
+.coordinates{display:none}
+.health{left:20px}
+.ammo{right:20px}
+.mission{left:20px}
+.radar{right:20px;width:128px}
+#map{width:126px;height:126px}
+.hud-help{bottom:18px}
+.english{font-size:25px}
+.status{font-size:8px}
+}
+@media(max-height:650px){.menu{transform:translateY(-40%)}
+h1{font-size:62px;margin-top:16px}
+.english{margin-bottom:15px}
+.description{margin-bottom:15px}
+.briefing{padding:12px 0}
+.footer{bottom:17px}
+.top{top:20px}
+}
+</style>
+</head>
+<body data-playing="false" data-debug="false">
+<canvas id="world" aria-label="第一人称射击游戏画面">
+</canvas>
+<div class="shade">
+</div>
+<header class="top">
+<div class="brand">
+<div class="mark">
+<span>+</span>
+</div>
+<div>
+<div class="wordmark">ZERO LINE</div>
+<div class="subbrand">TACTICAL SIMULATION</div>
+</div>
+</div>
+<div class="status">
+<i class="dot">
+</i>
+<span id="system-status">INITIALIZING</span>
+<button class="sound" id="sound" aria-label="切换声音">声音 ON</button>
+</div>
+</header>
+<section class="menu" id="menu">
+<div class="eyebrow" id="menu-tag">FIELD EXERCISE / 001</div>
+<h1 id="title">零界</h1>
+<div class="english" id="subtitle">ZERO LINE</div>
+<p class="description" id="description">进入废弃工业区, 清除所有敌方单位.<br>寻找掩体, 保持移动, 每一次射击都算数.</p>
+<div class="briefing">
+<div>
+<strong id="target-total">06</strong>
+<small>敌方单位</small>
+</div>
+<div>
+<strong>AR-04</strong>
+<small>制式步枪</small>
+</div>
+<div>
+<strong id="menu-time">∞</strong>
+<small id="menu-time-label">自由交战</small>
+</div>
+</div>
+<button id="start" disabled>
+<span id="start-label">正在准备训练场</span>
+<span>↗</span>
+</button>
+<div class="start-note" id="start-note">本地离线运行 · 点击后锁定鼠标 · ESC 暂停</div>
+</section>
+<div class="scene-label">
+<b>SECTOR 04</b>
+<span>工业训练场 / LIVE ENVIRONMENT</span>
+</div>
+<footer class="footer">
+<div class="controls">
+<span>
+<kbd>W A S D</kbd>移动</span>
+<span>
+<kbd>鼠标</kbd>瞄准 / 射击</span>
+<span>
+<kbd>R</kbd>换弹</span>
+<span>
+<kbd>B</kbd>自由飞行</span>
+</div>
+<div class="coordinates">PROCEDURAL WORLD<br>31° 13′ N / 121° 28′ E</div>
+</footer>
+<div class="hud">
+<div class="compass" id="compass">N · 000 · N</div>
+<div class="mission">
+<small>OBJECTIVE / 01</small>
+<p>清除敌方单位 <b id="objective">0 / 6</b>
+</p>
+</div>
+<div class="radar">
+<canvas id="map" width="332" height="332">
+</canvas>
+<div class="radar-label">
+<span>FIELD RADAR</span>
+<span id="clock">00:00</span>
+</div>
+</div>
+<div class="health">
+<div class="micro">OPERATOR / 生命值</div>
+<div class="value">
+<span>+</span>
+<span id="health">100</span>
+</div>
+<div class="healthbar">
+<i id="health-bar">
+</i>
+</div>
+</div>
+<div class="ammo">
+<div class="micro" id="ammo-state">AR-04 / READY</div>
+<div class="ammo-number">
+<span id="ammo">30</span>
+<small> / ∞</small>
+</div>
+<div class="weapon-line">5.56 MM · AUTOMATIC</div>
+</div>
+<div class="hud-help">SPACE 跳跃  SHIFT 奔跑  R 换弹  B 调试  ESC 暂停</div>
+<div class="crosshair" id="crosshair">
+</div>
+</div>
+<div id="damage">
+</div>
+<div id="toast" role="status">
+</div>
+<div id="debug">
+</div>
+<details id="faults" open>
+<summary id="fault-title">模块错误</summary>
+<div id="fault-list">
+</div>
+<button onclick="location.reload()">重新加载</button>
+</details>
+<script>
+'use strict';
+// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, damage?, alive?, muzzle?}.
+// 隔离可选模块的回调异常. 主程序统一维护唯一主循环和通用游戏规则.
+window.FPS = { models: Object.create(null) };
+const $ = id => document.getElementById(id), failures = new Set();
+function report(scope, error) {
+  const message = scope + ': ' + (error?.message || error), key = message.slice(0, 500);
+  if (failures.has(key)) return; failures.add(key);
+  const line = document.createElement('div'); line.textContent = message; $('fault-list').append(line);
+  $('faults').style.display = 'block'; $('fault-title').textContent = `模块错误 (${failures.size}) · 其他可用功能继续运行`;
+  $('system-status').textContent = 'DEGRADED / 部分模块不可用'; console.error(message);
+}
+window.addEventListener('error', e => { if (e.message) report(e.filename?.split('/').pop() || '运行时', e.message); });
+window.addEventListener('unhandledrejection', e => { report('异步任务', e.reason); e.preventDefault(); });
+function load(path) {
+  return new Promise(resolve => {
+    const script = document.createElement('script'); let settled = false;
+    const finish = ok => { if (settled) return; settled = true; clearTimeout(timer); resolve(ok); };
+    const timer = setTimeout(() => { script.remove(); report(path, '加载超时'); finish(false); }, 7000);
+    script.src = path; script.onload = () => finish(true);
+    script.onerror = () => { report(path, '文件不存在或无法加载'); finish(false); }; document.head.append(script);
+  });
+}
+let T, renderer, scene, camera, layout, weapon, api, solid = [], actors = [], entries = [], effects = [], helpers = [];
+let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0, vy = 0, grounded = false;
+let ammo = 30, reloadLeft = 0, cooldown = 0, recoil = 0, hurt = 0, hit = 0, toastLeft = 0, walk = 0, fps = 60;
+let firing = false, dragging = false, muted = false, audio, last = 0, hudElapsed = 0;
+const keys = new Set(), player = { position: null, health: 100, debug: false };
+const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
+const tuple = (a, fallback) => a === undefined ? fallback : Array.isArray(a) && a.length === 3 && a.every(Number.isFinite) ? a : (() => { throw Error('必须提供三个有限数值'); })();
+function tell(message) { $('toast').textContent = message; toastLeft = 3; $('toast').style.opacity = 1; }
+function guarded(scope, fn) { try { return fn(); } catch (e) { report(scope, e); } }
+function eye() { return player.position.clone().add(new T.Vector3(0, 1.65, 0)); }
+function footprint(p, radius, b) {
+  const dx = p.x - clamp(p.x, b.min.x, b.max.x), dz = p.z - clamp(p.z, b.min.z, b.max.z);
+  return dx * dx + dz * dz < radius * radius;
+}
+function overlaps(p, radius, height, b) {
+  return p.y < b.max.y - .025 && p.y + height > b.min.y + .025 && footprint(p, radius, b);
+}
+// 布局碰撞盒与角色圆形截面相交时, 细分最后一步直到接触位置.
+function move(root, dx, dz, radius = .32, height = 1.75) {
+  const p = root.position, start = p.clone(), steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / .15));
+  for (let i = 0; i < steps; i++) for (const [axis, d] of [['x', dx / steps], ['z', dz / steps]]) {
+    if (!d) continue;
+    const origin = p[axis]; p[axis] = origin + d;
+    if (solid.some(s => overlaps(p, radius, height, s.box))) {
+      let safe = 0, blocked = 1;
+      for (let n = 0; n < 8; n++) {
+        const fraction = (safe + blocked) / 2; p[axis] = origin + d * fraction;
+        if (solid.some(s => overlaps(p, radius, height, s.box))) blocked = fraction; else safe = fraction;
+      }
+      p[axis] = origin + d * safe;
+    }
+  }
+  return p.distanceTo(start);
+}
+function visible(from, to) {
+  const ray = new T.Raycaster(from, to.clone().sub(from).normalize(), .03, from.distanceTo(to));
+  return ray.intersectObjects([...new Set(solid.map(s => s.root))], true).length === 0;
+}
+function dispose(root) {
+  const geometries = new Set(), materials = new Set();
+  root.traverse(n => { if (n.geometry) geometries.add(n.geometry); if (n.material) for (const m of [n.material].flat()) materials.add(m); });
+  geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); root.removeFromParent();
+}
+const disabledEffects = new Set();
+function effect(name, options) {
+  if (!FPS.models[name] || disabledEffects.has(name)) return;
+  try {
+    const e = FPS.models[name](T, options); if (!e?.root?.isObject3D) throw Error('模型未返回 root');
+    e.left = e.duration || .1; if (options.view) e.root.traverse(n => n.layers.set(1)); effects.push(e); scene.add(e.root);
+  } catch (error) { disabledEffects.add(name); report('特效 ' + name, error); }
+}
+function tone(frequency, duration = .08, volume = .035) {
+  if (muted || !audio) return;
+  guarded('音效', () => {
+    const osc = audio.createOscillator(), gain = audio.createGain(), t = audio.currentTime;
+    osc.type = 'triangle'; osc.frequency.setValueAtTime(frequency, t); osc.frequency.exponentialRampToValueAtTime(45, t + duration);
+    gain.gain.setValueAtTime(volume, t); gain.gain.exponentialRampToValueAtTime(.001, t + duration);
+    osc.connect(gain).connect(audio.destination); osc.start(); osc.stop(t + duration);
+  });
+}
+function finish(won) {
+  mode = won ? 'won' : 'dead'; firing = false; keys.clear(); document.exitPointerLock?.();
+  showMenu(won ? '区域肃清' : '训练终止', won ? 'AREA SECURED' : 'OPERATOR DOWN', '重新部署');
+  $('description').textContent = won ? `全部 ${total} 个敌方单位已清除.训练完成, 可以重新部署再次挑战.` : `本次已清除 ${kills} / ${total} 个敌方单位.利用掩体避开火力, 换个路线再试一次.`;
+  $('menu-time').textContent = formatTime(time); $('menu-time-label').textContent = '本次用时';
+}
+function damagePlayer(amount) {
+  if (player.debug || mode !== 'playing') return;
+  player.health = Math.max(0, player.health - amount); hurt = .7; tone(90, .12, .035);
+  if (!player.health) finish(false);
+}
+function shoot(from, direction, team, damage) {
+  scene.updateMatrixWorld(true);
+  const targets = [...new Set(solid.map(s => s.root))].concat(team === 'player' ? actors.filter(a => a.alive && !a.disabled).map(a => a.root) : []);
+  const ray = new T.Raycaster(from, direction, .025, 100), contact = ray.intersectObjects(targets, true)[0];
+  let distance = contact?.distance ?? 100, end = from.clone().addScaledVector(direction, distance);
+  if (team === 'enemy') {
+    const p = player.position, box = new T.Box3(new T.Vector3(p.x - .32, p.y, p.z - .32), new T.Vector3(p.x + .32, p.y + 1.75, p.z + .32));
+    const point = ray.ray.intersectBox(box, new T.Vector3());
+    if (point && point.distanceTo(from) < distance) { end = point; damagePlayer(damage); }
+    tone(130, .07, Math.max(.002, .025 - from.distanceTo(eye()) * .001));
+  } else if (contact) {
+    let n = contact.object, headshot = false, actor;
+    while (n) { headshot ||= n.userData.zone === 'head'; actor ||= n.userData.actor; n = n.parent; }
+    if (actor?.alive) { guarded('敌人受击 ' + actor.id, () => actor.damage(damage * (headshot ? 2 : 1), api)); hit = .12; tone(500, .045, .02); }
+  }
+  const origin = team === 'player' && !weapon?.disabled && weapon?.muzzle ? weapon.muzzle.getWorldPosition(new T.Vector3()) : from;
+  effect('tracer', { from: origin, to: end, color: team === 'player' ? 0xffeab2 : 0xff8457 });
+  return { distance: from.distanceTo(end), hit: !!contact };
+}
+function playerFire() {
+  if (mode !== 'playing' || cooldown > 0 || reloadLeft > 0 || player.debug) return;
+  if (ammo === 0) { reload(); return; }
+  ammo--; cooldown = .115; recoil = 1;
+  // 快速单击可能早于下一帧, 射击前同步最新视角以免使用上一帧的准星方向.
+  camera.position.copy(eye()); camera.rotation.set(pitch, yaw, 0, 'YXZ'); camera.updateMatrixWorld(true);
+  const direction = new T.Vector3(); camera.getWorldDirection(direction);
+  shoot(eye(), direction, 'player', 34); tone(185, .095, .065);
+  if (!weapon?.disabled && weapon?.muzzle) {
+    effect('flash', { position: weapon.muzzle.getWorldPosition(new T.Vector3()), rotation: camera.quaternion, view: true });
+    api.flash.position.copy(weapon.muzzle.getWorldPosition(new T.Vector3())); api.flash.intensity = 3;
+  }
+  pitch = clamp(pitch + .007, -1.5, 1.5);
+}
+function reload() { if (mode === 'playing' && ammo < 30 && reloadLeft <= 0) { reloadLeft = 1.65; tone(280, .09); tell('更换弹匣'); } }
+function createInstance(data) {
+  if (!data || typeof data.id !== 'string' || entries.some(e => e.id === data.id)) throw Error('实例 ID 缺失或重复');
+  const factory = FPS.models[data.model]; if (typeof factory !== 'function') throw Error('模型不可用: ' + data.model);
+  const position = tuple(data.position, [0, 0, 0]), rotation = tuple(data.rotation, [0, 0, 0]), scale = tuple(data.scale, [1, 1, 1]);
+  if (scale.some(x => x <= 0)) throw Error('缩放必须大于零');
+  const boxes = [];
+  if (data.collision?.enabled) {
+    const parts = data.collision.boxes ?? [data.collision];
+    if (!Array.isArray(parts) || !parts.length) throw Error('碰撞盒列表必须为非空数组');
+    for (const part of parts) {
+      const size = tuple(part.size, null), offset = tuple(part.offset, [0, 0, 0]);
+      if (!size || size.some(x => x <= 0)) throw Error('碰撞尺寸必须大于零');
+      const center = new T.Vector3(...offset), half = new T.Vector3(...size).multiplyScalar(.5);
+      boxes.push(new T.Box3(center.clone().sub(half), center.clone().add(half)));
+    }
+  }
+  if (data.attach && data.attach !== 'camera') throw Error('未知挂载目标');
+  const instance = factory(T, data.options || {}); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
+  for (const callback of ['update', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
+  if (instance.muzzle !== undefined && !instance.muzzle?.isObject3D) throw Error('枪口必须为 Object3D');
+  const root = instance.root; root.position.set(...position); root.rotation.set(...rotation); root.scale.set(...scale);
+  root.name = data.id; instance.id = data.id; instance.data = data;
+  (data.attach === 'camera' ? camera : scene).add(root); root.updateWorldMatrix(true, true);
+  for (const box of boxes) solid.push({ root, box: box.applyMatrix4(root.matrixWorld), id: data.id });
+  if (typeof instance.damage === 'function') { root.userData.actor = instance; actors.push(instance); }
+  if (data.attach === 'camera') { weapon = instance; root.traverse(n => n.layers.set(1)); root.visible = false; }
+  entries.push(instance); return instance;
+}
+function toggleDebug() {
+  if (!ready || mode !== 'playing') return;
+  if (player.debug) {
+    if (!solid.length) { tell('场景无可用碰撞体, 保持自由飞行'); return; }
+    const p = player.position;
+    const supported = solid.some(s => s.box.max.y <= p.y + .035 && footprint(p, .32, s.box));
+    if (!supported || solid.some(s => overlaps(p, .32, 1.75, s.box))) p.copy(api.spawn);
+  }
+  player.debug = !player.debug; vy = 0; grounded = false; firing = false;
+  document.body.dataset.debug = player.debug; if (weapon) weapon.root.visible = !player.debug && !weapon.disabled;
+  syncCollisionWireframes();
+  tell(player.debug ? '自由飞行 · 碰撞线框已显示 · B 返回正常模式' : '已恢复重力和正常交战');
+}
+function syncCollisionWireframes() {
+  for (const h of helpers) dispose(h); helpers = [];
+  if (!player.debug) return;
+  for (const s of solid) {
+    const h = new T.Box3Helper(s.box, 0xbbe48d);
+    h.material.depthTest = h.material.depthWrite = false; h.material.toneMapped = false;
+    h.renderOrder = 999; scene.add(h); helpers.push(h);
+  }
+}
+function updatePlayer(dt) {
+  let x = Number(keys.has('KeyD')) - Number(keys.has('KeyA')), z = Number(keys.has('KeyW')) - Number(keys.has('KeyS'));
+  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8 : 4.7) * (player.debug ? 1.7 : 1);
+  const forward = new T.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new T.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
+  if (player.debug) camera.getWorldDirection(forward);
+  const delta = forward.multiplyScalar(z).addScaledVector(right, x);
+  if (player.debug) delta.y += Number(keys.has('Space')) - Number(keys.has('ControlLeft') || keys.has('ControlRight'));
+  if (delta.lengthSq() > 1) delta.normalize(); delta.multiplyScalar(speed * dt);
+  walk = delta.length() / Math.max(dt * 8, .001);
+  if (player.debug) player.position.add(delta);
+  else {
+    move(player, delta.x, delta.z);
+    if (keys.has('Space') && grounded) { vy = 6.1; grounded = false; }
+    vy -= 18 * dt; const oldY = player.position.y, nextY = oldY + vy * dt; let next = nextY;
+    grounded = false;
+    for (const { box: b } of solid) {
+      const p = player.position;
+      if (!footprint(p, .32, b)) continue;
+      if (vy <= 0 && oldY >= b.max.y - .035 && nextY <= b.max.y) { next = Math.max(next, b.max.y); grounded = true; }
+      else if (vy > 0 && oldY + 1.75 <= b.min.y + .035 && nextY + 1.75 >= b.min.y) { next = Math.min(next, b.min.y - 1.75); vy = 0; }
+    }
+    player.position.y = next; if (grounded) vy = 0;
+    if (next < -15) { player.position.copy(api.spawn); vy = 0; tell('已返回出生点'); }
+  }
+  camera.position.copy(eye()); camera.rotation.set(pitch, yaw, 0, 'YXZ'); camera.updateMatrixWorld(true);
+}
+function showMenu(title, subtitle, button) {
+  document.body.dataset.playing = 'false'; $('title').textContent = title; $('subtitle').textContent = subtitle; $('start-label').textContent = button;
+}
+function pause() {
+  if (mode !== 'playing') return; mode = 'paused'; keys.clear(); firing = dragging = false;
+  showMenu('暂离战场', 'SIMULATION PAUSED', '继续训练'); $('description').textContent = '训练已暂停.继续后返回当前交战位置, 保持警惕.';
+}
+async function start() {
+  if (!ready) return;
+  if (mode === 'won' || mode === 'dead') { location.reload(); return; }
+  mode = 'playing'; document.body.dataset.playing = 'true';
+  if (weapon) weapon.root.visible = !player.debug && !weapon.disabled;
+  camera.position.copy(eye()); camera.rotation.set(pitch, yaw, 0, 'YXZ');
+  guarded('音频初始化', () => { audio ||= new (window.AudioContext || window.webkitAudioContext)(); audio.resume().catch(e => report('音频', e)); });
+  try { await $('world').requestPointerLock(); }
+  catch { tell('鼠标锁定不可用: 按住鼠标右键拖动视角, 左键射击'); }
+}
+$('start').onclick = start;
+$('sound').onclick = () => { muted = !muted; $('sound').textContent = muted ? '声音 OFF' : '声音 ON'; };
+document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) pause(); });
+document.addEventListener('keydown', e => {
+  if (mode !== 'playing') return;
+  if (['Space', 'KeyB'].includes(e.code)) e.preventDefault();
+  keys.add(e.code); if (e.repeat) return;
+  if (e.code === 'KeyR') reload(); if (e.code === 'KeyB') toggleDebug();
+  if (e.code === 'Escape') { pause(); document.exitPointerLock?.(); }
+});
+document.addEventListener('keyup', e => keys.delete(e.code));
+$('world').addEventListener('mousedown', e => { if (mode !== 'playing') return; if (e.button === 0) { firing = true; playerFire(); } if (e.button === 2) dragging = true; });
+document.addEventListener('mouseup', e => { if (e.button === 0) firing = false; if (e.button === 2) dragging = false; });
+$('world').addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('mousemove', e => {
+  if (mode !== 'playing' || (!document.pointerLockElement && !dragging)) return;
+  yaw -= e.movementX * .002; pitch = clamp(pitch - e.movementY * .002, -1.5, 1.5);
+});
+window.addEventListener('blur', () => { pause(); document.exitPointerLock?.(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { pause(); document.exitPointerLock?.(); } });
+function formatTime(t) { return `${Math.floor(t / 60).toString().padStart(2, '0')}:${Math.floor(t % 60).toString().padStart(2, '0')}`; }
+function drawMap() {
+  const c = $('map').getContext('2d'), size = 332, k = 4.65, cx = 166, cy = 166;
+  c.clearRect(0, 0, size, size); c.strokeStyle = '#d8e5c715'; c.lineWidth = 1;
+  for (let i = 26; i < size; i += 28) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i, size); c.moveTo(0, i); c.lineTo(size, i); c.stroke(); }
+  c.fillStyle = '#d8e5c739';
+  for (const s of solid) if (s.box.max.y > .5) { const b = s.box; c.fillRect(cx + b.min.x * k, cy + b.min.z * k, (b.max.x - b.min.x) * k, (b.max.z - b.min.z) * k); }
+  c.fillStyle = '#f18c60'; for (const a of actors) if (a.alive && !a.disabled) { c.beginPath(); c.arc(cx + a.root.position.x * k, cy + a.root.position.z * k, 4, 0, Math.PI * 2); c.fill(); }
+  c.save(); c.translate(cx + player.position.x * k, cy + player.position.z * k); c.rotate(-yaw);
+  c.fillStyle = '#e2edba'; c.beginPath(); c.moveTo(0, -8); c.lineTo(-6, 6); c.lineTo(0, 3); c.lineTo(6, 6); c.closePath(); c.fill(); c.restore();
+}
+function updateHUD() {
+  $('health').textContent = Math.ceil(player.health); $('health-bar').style.width = player.health + '%'; $('ammo').textContent = String(ammo).padStart(2, '0');
+  $('ammo-state').textContent = reloadLeft > 0 ? `RELOADING / ${reloadLeft.toFixed(1)}s` : ammo ? 'AR-04 / READY' : 'EMPTY / R 换弹';
+  $('objective').textContent = `${kills} / ${total}`; $('clock').textContent = formatTime(time);
+  const heading = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
+  $('compass').textContent = `· ${['N', 'E', 'S', 'W'][Math.round(heading / 90) % 4]} · ${Math.round(heading).toString().padStart(3, '0')} ·`;
+  $('debug').textContent = `DEBUG / FREE FLIGHT\nFPS ${fps.toFixed(0)}  DRAW ${renderer.info.render.calls}\nXYZ ${player.position.toArray().map(n => n.toFixed(2)).join(' / ')}\nYAW ${heading.toFixed(1)}  PITCH ${(pitch * 180 / Math.PI).toFixed(1)}\nWASD 镜头方向 · SPACE / CTRL 升降\nSHIFT 加速 · B 退出 · 碰撞线框已显示\n玩家碰撞半径 0.32 m\n模块 ${Object.keys(FPS.models).length}  异常 ${failures.size}`;
+  drawMap();
+}
+function frame(stamp) {
+  const dt = Math.min((stamp - (last || stamp)) / 1000, .05); last = stamp; fps += ((1 / Math.max(dt, .001)) - fps) * .05;
+  if (mode === 'playing') {
+    time += dt; cooldown -= dt; recoil = Math.max(0, recoil - dt * 7);
+    if (reloadLeft > 0) { reloadLeft = Math.max(0, reloadLeft - dt); if (!reloadLeft) { ammo = 30; tone(350, .07); } }
+    updatePlayer(dt); if (firing) playerFire();
+    scene.updateMatrixWorld(true);
+    for (const e of entries) if (e.update && !e.disabled) {
+      try { e.update(dt, e === weapon ? { time, walk, recoil, reload: reloadLeft > 0 ? Math.sin(reloadLeft / 1.65 * Math.PI) : 0 } : api); }
+      catch (error) {
+        e.disabled = true; e.root.visible = false; report(e.id + ' 更新', error);
+        solid = solid.filter(s => s.root !== e.root); syncCollisionWireframes(); if (e.alive) { e.alive = false; total--; }
+      }
+    }
+    if (total > 0 && kills >= total && mode === 'playing') finish(true);
+  }
+  for (let i = effects.length - 1; i >= 0; i--) { effects[i].left -= dt; if (effects[i].left <= 0) { dispose(effects[i].root); effects.splice(i, 1); } }
+  api.flash.intensity *= Math.exp(-dt * 50); hurt = Math.max(0, hurt - dt * 1.6); hit = Math.max(0, hit - dt); toastLeft -= dt;
+  $('damage').style.opacity = hurt; $('crosshair').classList.toggle('hit', hit > 0); if (toastLeft <= 0) $('toast').style.opacity = 0;
+  hudElapsed += dt; if (hudElapsed > .1) { updateHUD(); hudElapsed = 0; }
+  renderer.render(scene, camera);
+  // 绘制第一人称武器前仅清除深度, 避免穿墙并保留武器自身的遮挡关系.
+  if (weapon?.root.visible) {
+    const background = scene.background; scene.background = null;
+    renderer.autoClear = false; renderer.shadowMap.autoUpdate = false; renderer.clearDepth(); camera.layers.set(1);
+    try { renderer.render(scene, camera); }
+    finally { scene.background = background; camera.layers.set(0); renderer.autoClear = true; renderer.shadowMap.autoUpdate = true; }
+  }
+}
+async function boot() {
+  const [engineOK, layoutOK] = await Promise.all([load('vendor/three.min.js'), load('scene-layout.js')]);
+  if (!engineOK || !window.THREE) { $('start-label').textContent = '渲染引擎不可用'; $('start-note').textContent = '请恢复 vendor/three.min.js 后重新加载'; report('Three.js', '无法启动 3D 渲染, 错误界面仍可使用'); return; }
+  T = window.THREE; layout = layoutOK && window.FPS_LAYOUT || {};
+  if (!layoutOK || !window.FPS_LAYOUT) report('scene-layout.js', '布局不可用, 进入空场景自由飞行');
+  scene = new T.Scene();
+  const atmosphere = layout.atmosphere || {};
+  guarded('环境配置', () => { scene.background = new T.Color(atmosphere.sky ?? 0xb8c7ba); scene.fog = new T.Fog(atmosphere.sky ?? 0xb8c7ba, atmosphere.fogNear || 28, atmosphere.fogFar || 95); });
+  camera = new T.PerspectiveCamera(72, innerWidth / innerHeight, .05, 160); scene.add(camera);
+  try {
+    renderer = new T.WebGLRenderer({ canvas: $('world'), antialias: true }); renderer.setPixelRatio(Math.min(devicePixelRatio, 1.7)); renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap; renderer.toneMapping = T.ACESFilmicToneMapping; renderer.toneMappingExposure = atmosphere.exposure || 1.12;
+  } catch (e) { report('WebGL', e); $('start-label').textContent = '浏览器无法创建 3D 画面'; $('start-note').textContent = '请使用支持 WebGL 2 的桌面浏览器'; return; }
+  $('world').addEventListener('webglcontextlost', e => { e.preventDefault(); pause(); report('WebGL', '渲染上下文丢失, 请重新加载'); });
+  const lights = Array.isArray(layout.lights) ? layout.lights : [];
+  for (const [i, l] of lights.entries()) guarded('灯光 ' + i, () => {
+    const light = l.type === 'hemisphere' ? new T.HemisphereLight(l.sky, l.ground, l.intensity) : l.type === 'sun' ? new T.DirectionalLight(l.color, l.intensity) : new T.PointLight(l.color, l.intensity, l.distance || 20);
+    light.position.set(...tuple(l.position, [0, 10, 0])); light.layers.enable(1); scene.add(light);
+    if (light.isDirectionalLight) {
+      light.target.position.set(...tuple(l.target, [0, 0, 0])); scene.add(light.target); light.castShadow = !!l.shadow;
+      Object.assign(light.shadow.camera, { left: -38, right: 38, top: 38, bottom: -38, near: 1, far: 90 }); light.shadow.mapSize.set(2048, 2048); light.shadow.bias = -.0004; light.shadow.normalBias = .035;
+    }
+  });
+  if (!lights.length) scene.add(new T.AmbientLight(0xffffff, 2));
+  player.position = new T.Vector3(); guarded('玩家出生点', () => player.position.set(...tuple(layout.player?.position, [0, 2, 10])));
+  yaw = Number.isFinite(layout.player?.yaw) ? layout.player.yaw : 0; pitch = Number.isFinite(layout.player?.pitch) ? layout.player.pitch : 0;
+  api = { player, eye, move, visible, shoot, effect, spawn: player.position.clone(), flash: new T.PointLight(0xffc572, 0, 4), killed() { kills++; tell(`敌方单位已清除 · ${kills} / ${total}`); } };
+  api.flash.layers.enable(1); scene.add(api.flash);
+  const catalog = layout.catalog && typeof layout.catalog === 'object' ? layout.catalog : {};
+  await Promise.all(Object.entries(catalog).map(async ([name, path]) => {
+    if (typeof path !== 'string' || !/^[\w./-]+\.js$/.test(path) || path.includes('..')) { report(name, '模型路径必须为项目内 JS 文件'); return; }
+    if (await load(path) && typeof FPS.models[name] !== 'function') report(path, '脚本未注册模型 ' + name);
+  }));
+  const instances = Array.isArray(layout.instances) ? layout.instances : [];
+  if (!Array.isArray(layout.instances)) report('场景布局', 'instances 必须是数组');
+  for (const data of instances) guarded('实例 ' + (data?.id || '?'), () => createInstance(data));
+  total = actors.length; $('target-total').textContent = String(total).padStart(2, '0');
+  if (!solid.some(s => overlaps(api.spawn.clone().add(new T.Vector3(0, -.1, 0)), .1, .1, s.box))) {
+    player.debug = true; document.body.dataset.debug = 'true'; tell('出生点无地面, 已启用自由飞行');
+  }
+  syncCollisionWireframes();
+  camera.position.set(18, 11, 27); camera.lookAt(0, 1, -8); scene.updateMatrixWorld(true);
+  if (!failures.size) $('system-status').textContent = 'SYSTEM ONLINE / 本地就绪';
+  $('start-label').textContent = total ? '进入训练场' : '进入场景'; $('start').disabled = false; ready = true;
+  window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+  // 提供状态和实例引用以便排查问题, 不创建额外的主循环.
+  FPS.inspect = () => ({ ready, mode, time, ammo, reloadLeft, kills, total, player, actors, entries, solid, camera, renderer, failures: [...failures] });
+  renderer.setAnimationLoop(stamp => { try { frame(stamp); } catch (error) { report('主循环', error); } });
+}
+boot().catch(error => { report('初始化', error); $('start-label').textContent = '初始化失败 · 查看错误'; });
+</script>
+</body>
+</html>
