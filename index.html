@@ -73,9 +73,9 @@ body[data-playing="true"] .menu,body[data-playing="true"] .scene-label,body[data
 .crosshair.hit{transform:translate(-50%,-50%) rotate(45deg);filter:drop-shadow(0 0 3px #f99d46)}
 .crosshair.hit:before,.crosshair.hit:after{background:var(--accent)}
 #damage{position:fixed;left:50%;top:50%;width:0;height:0;pointer-events:none;opacity:0}
-#damage::before{content:"";position:absolute;left:-9px;top:calc(-1 * min(110px,25vmin));border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:18px solid #ff3d32;filter:drop-shadow(0 1px 2px #260000)}
+#damage::before{content:"";position:absolute;left:-12px;top:calc(-1 * min(110px,25vmin));border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:24px solid #ff3d32;filter:drop-shadow(0 1px 2px #260000)}
 #toast{position:fixed;left:50%;top:72%;transform:translateX(-50%);background:#102b24cb;padding:12px 22px;border-left:2px solid var(--accent);font-size:12px;opacity:0;pointer-events:none;transition:opacity .15s}
-#debug{position:fixed;left:36px;top:184px;white-space:pre;font:11px/1.8 monospace;color:#d9efbe;background:#122c24d9;padding:14px;border:1px solid #a9d67466;display:none;pointer-events:none}
+#debug{position:fixed;left:36px;top:184px;white-space:pre;font:12px/1.7 monospace;color:#d9efbe;background:#122c24ed;padding:14px;border:1px solid #a9d67466;display:none;pointer-events:none}
 #faults{position:fixed;top:96px;right:36px;max-width:440px;width:calc(100% - 72px);background:#331d16ed;color:#ffe0c1;border:1px solid #f4a36388;font-size:11px;z-index:10;display:none;padding:10px 14px}
 #faults summary{cursor:pointer;font-weight:700}
 #fault-list{max-height:180px;overflow:auto;padding:8px 0;line-height:1.7;overflow-wrap:anywhere}
@@ -528,7 +528,7 @@ function toggleDebug() {
   player.debug = !player.debug; player.body.vy = 0; player.body.grounded = false; firing = false;
   if (!player.debug) separateBodies();
   document.body.dataset.debug = player.debug; if (weapon) weapon.root.visible = !player.debug && !weapon.disabled;
-  syncCollisionWireframes();
+  syncCollisionWireframes(); updateHUD();
   tell(player.debug ? '自由飞行 · 碰撞线框已显示 · B 返回正常模式' : '已恢复重力和正常交战');
 }
 function syncCollisionWireframes() {
@@ -621,7 +621,8 @@ function updateHUD() {
   $('objective').textContent = `${kills} / ${total}`; $('clock').textContent = formatTime(time);
   const heading = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
   $('compass').textContent = `· ${['N', 'E', 'S', 'W'][Math.round(heading / 90) % 4]} · ${Math.round(heading).toString().padStart(3, '0')} ·`;
-  $('debug').textContent = `DEBUG / FREE FLIGHT\nFPS ${fps.toFixed(0)}  DRAW ${renderer.info.render.calls}\nXYZ ${player.position.toArray().map(n => n.toFixed(2)).join(' / ')}\nYAW ${heading.toFixed(1)}  PITCH ${(pitch * 180 / Math.PI).toFixed(1)}\nWASD 镜头方向 · SPACE / CTRL 升降\nSHIFT 加速 · B 退出 · 碰撞线框已显示\n玩家碰撞半径 0.32 m\n绿 静态 / 青 身体 / 橙 命中\n模块 ${Object.keys(FPS.models).length}  异常 ${failures.size}`;
+  const p = player.position;
+  $('debug').textContent = `DEBUG / FREE FLIGHT\n玩家脚底坐标 (m)\nX  ${p.x.toFixed(2)}\nY  ${p.y.toFixed(2)}\nZ  ${p.z.toFixed(2)}\nFPS ${fps.toFixed(0)}  DRAW ${renderer.info.render.calls}\nYAW ${heading.toFixed(1)}  PITCH ${(pitch * 180 / Math.PI).toFixed(1)}\nWASD 镜头方向 · SPACE / CTRL 升降\nSHIFT 加速 · B 退出\n玩家碰撞半径 0.32 m\n绿 静态 / 青 身体 / 橙 命中\n模块 ${Object.keys(FPS.models).length}  异常 ${failures.size}`;
   drawMap();
 }
 function frame(stamp) {

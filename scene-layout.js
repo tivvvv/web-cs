@@ -6,7 +6,7 @@ window.FPS_LAYOUT = {
   catalog: {
     floor: 'models/floor.js', building: 'models/building.js',
     container: 'models/container.js', barrier: 'models/barrier.js',
-    rifle: 'models/rifle.js', enemy: 'models/enemy.js',
+    rifle: 'models/rifle.js', enemy: 'models/enemy.js', crate: 'models/crate.js',
     tracer: 'models/tracer.js', flash: 'models/flash.js', impact: 'models/impact.js', bulletmark: 'models/bulletmark.js'
   },
   player: { position: [0, 0, 22], yaw: 0, pitch: -.025 },
@@ -16,6 +16,10 @@ window.FPS_LAYOUT = {
     { type: 'sun', color: 0xffe2af, intensity: 3.2, position: [-18, 28, 14], target: [0, 0, -5], shadow: true }
   ],
   instances: [
+    { id: 'crate-left', model: 'crate', position: [-4, 0, 17], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, size: [1.6, 1.6, 1.6], offset: [0, .8, 0] } },
+    { id: 'crate-top', model: 'crate', position: [-4, 1.6, 17], rotation: [0, Math.PI / 2, 0], scale: [1, 1, 1], collision: { enabled: true, size: [1.6, 1.6, 1.6], offset: [0, .8, 0] } },
+    { id: 'crate-middle', model: 'crate', position: [-2.2, 0, 17], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, size: [1.6, 1.6, 1.6], offset: [0, .8, 0] } },
+    { id: 'crate-right', model: 'crate', position: [3, 0, 19], rotation: [0, Math.PI / 2, 0], scale: [.75, 1, .75], collision: { enabled: true, size: [1.6, 1.6, 1.6], offset: [0, .8, 0] } },
     { id: 'yard', model: 'floor', position: [0, -.25, 0], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: true, size: [52, .5, 60] } },
     { id: 'north', model: 'building', position: [0, 0, -31.5], rotation: [0, 0, 0], scale: [54, 8, 3], options: { label: '04 / ZERO LINE' }, collision: { enabled: true, size: [1, 1, 1], offset: [0, .5, 0] } },
     { id: 'west', model: 'building', position: [-27.5, 0, 0], rotation: [0, Math.PI / 2, 0], scale: [60, 5, 3], collision: { enabled: true, size: [1, 1, 1], offset: [0, .5, 0] } },

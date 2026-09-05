@@ -40,7 +40,7 @@ try {
   const page = await open();
   await check('offline file:// startup, independent models and scene instances', async () => {
     const s = await page.evaluate(() => { const s = FPS.inspect(); return { ready: s.ready, errors: s.failures, actors: s.total, models: Object.keys(FPS.models).length, debug: s.player.debug }; });
-    assert.equal(s.ready, true); assert.deepEqual(s.errors, []); assert.equal(s.actors, 6); assert.equal(s.models, 10); assert.equal(s.debug, false);
+    assert.equal(s.ready, true); assert.deepEqual(s.errors, []); assert.equal(s.actors, 6); assert.equal(s.models, 11); assert.equal(s.debug, false);
     const east = await page.evaluate(() => { const b = FPS.inspect().solid.find(s => s.id === 'east').box; return { minX: b.min.x, maxZ: b.max.z }; });
     assert(Math.abs(east.minX - 26) < .001); assert(Math.abs(east.maxZ - 30) < .001);
     await mkdir(join(root, 'artifacts'), { recursive: true }); await page.screenshot({ path: join(root, 'artifacts/menu.png') });
@@ -129,10 +129,61 @@ try {
     await combat.keyboard.press('b'); const health = await combat.evaluate(() => FPS.inspect().player.health);
     await advance(combat, 1.5); assert.equal(await combat.evaluate(() => FPS.inspect().player.health), health);
     await combat.keyboard.press('b');
-    await combat.evaluate(() => { damagePlayer(1000); });
+    await combat.evaluate(() => { damagePlayer(1000, new THREE.Vector3(0, 1.65, 7)); });
     assert.equal(await combat.evaluate(() => FPS.inspect().mode), 'dead');
   });
   await combat.close();
+  const debugPage = await open(); await start(debugPage);
+  await debugPage.evaluate(() => { actors.forEach(a => { a.update = () => {}; }); });
+  await check('larger damage triangle points to the source and follows camera rotation', async () => {
+    const result = await debugPage.evaluate(() => {
+      player.position.set(0, 0, 22); yaw = 0; pitch = 0;
+      damagePlayer(1, new THREE.Vector3(5, 1.65, 22));
+      return { before: getComputedStyle($('damage'), '::before').borderBottomWidth, shadow: getComputedStyle($('damage')).boxShadow };
+    });
+    assert.equal(result.before, '24px'); assert.equal(result.shadow, 'none');
+    await advance(debugPage, .05);
+    const angle = await debugPage.evaluate(() => Number.parseFloat($('damage').style.transform.slice(7)));
+    assert(Math.abs(angle - Math.PI / 2) < .001);
+    await debugPage.screenshot({ path: join(root, 'artifacts/damage-direction.png') });
+    await debugPage.evaluate(() => { yaw = Math.PI / 2; }); await advance(debugPage, .05);
+    const turned = await debugPage.evaluate(() => Number.parseFloat($('damage').style.transform.slice(7)));
+    assert(Math.abs(turned - Math.PI) < .001);
+    await advance(debugPage, 1.2); assert.equal(await debugPage.locator('#damage').evaluate(e => e.style.opacity), '0');
+  });
+  await check('crates remain visible across debug toggles with matching collision bounds and live XYZ coordinates', async () => {
+    assert.equal(await debugPage.evaluate(() => entries.filter(e => e.data.model === 'crate').length), 4);
+    assert.equal(await debugPage.evaluate(() => entries.filter(e => e.data.model === 'crate').every(e => e.root.visible) && solid.filter(s => s.id.startsWith('crate-')).length === 4), true);
+    await debugPage.keyboard.press('b');
+    await debugPage.evaluate(() => { player.position.set(1.25, 3.5, 20.75); yaw = 0; pitch = -.3; });
+    await advance(debugPage, .2);
+    assert(await debugPage.locator('#debug').isVisible());
+    const label = await debugPage.locator('#debug').textContent();
+    assert(label.includes('玩家脚底坐标 (m)')); assert(label.includes('X  1.25\nY  3.50\nZ  20.75'));
+    const bounds = await debugPage.evaluate(() => entries.filter(e => e.data.model === 'crate').map(e => {
+      const visual = new THREE.Box3().setFromObject(e.root), collider = solid.find(s => s.root === e.root)?.box;
+      return e.root.visible && !!collider && visual.min.distanceTo(collider.min) < .001 && visual.max.distanceTo(collider.max) < .001;
+    }));
+    assert(bounds.every(Boolean));
+    assert.equal(await debugPage.evaluate(() => helpers.length === solid.length), true);
+    await debugPage.screenshot({ path: join(root, 'artifacts/debug-crates.png') });
+    await debugPage.keyboard.down('w'); await advance(debugPage, .2); await debugPage.keyboard.up('w'); await advance(debugPage, .15);
+    assert.notEqual(await debugPage.locator('#debug').textContent(), label);
+    // 木箱始终是实体, 从箱内退出调试时必须返回安全出生点.
+    await debugPage.evaluate(() => { player.position.set(-4, .5, 17); }); await debugPage.keyboard.press('b');
+    assert.equal(await debugPage.evaluate(() => entries.filter(e => e.data.model === 'crate').every(e => e.root.visible) && solid.filter(s => s.id.startsWith('crate-')).length === 4), true);
+    assert.equal(await debugPage.evaluate(() => player.position.x), 0);
+    assert.equal(await debugPage.locator('#debug').isVisible(), false);
+    await debugPage.keyboard.press('b'); await debugPage.keyboard.press('b'); await debugPage.keyboard.press('b');
+    assert.equal(await debugPage.evaluate(() => solid.filter(s => s.id.startsWith('crate-')).length), 4);
+    assert.deepEqual(await debugPage.evaluate(() => FPS.inspect().failures), []);
+  });
+  await debugPage.close();
+  await check('missing crate module preserves flight and creates no invisible collision', () => fixture('crate-missing', d => rm(join(d, 'models/crate.js')), async p => {
+    await start(p); await p.keyboard.press('b'); await advance(p, .2);
+    assert.equal(await p.evaluate(() => player.debug && !solid.some(s => s.id.startsWith('crate-'))), true);
+    assert((await p.locator('#fault-list').textContent()).includes('crate.js'));
+  }));
   await check('missing model reports error, skips its collisions and keeps running', () => fixture('missing', d => rm(join(d, 'models/container.js')), async p => {
     assert((await p.locator('#fault-list').textContent()).includes('container.js'));
     assert.equal(await p.evaluate(() => FPS.inspect().solid.some(s => s.id.startsWith('cargo'))), false);
