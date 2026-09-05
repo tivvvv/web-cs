@@ -72,7 +72,8 @@ body[data-playing="true"] .menu,body[data-playing="true"] .scene-label,body[data
 .crosshair:after{height:2px;width:16px;left:4px;top:11px}
 .crosshair.hit{transform:translate(-50%,-50%) rotate(45deg);filter:drop-shadow(0 0 3px #f99d46)}
 .crosshair.hit:before,.crosshair.hit:after{background:var(--accent)}
-#damage{position:fixed;inset:0;box-shadow:inset 0 0 160px 35px #c13220;pointer-events:none;opacity:0}
+#damage{position:fixed;left:50%;top:50%;width:0;height:0;pointer-events:none;opacity:0}
+#damage::before{content:"";position:absolute;left:-9px;top:calc(-1 * min(110px,25vmin));border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:18px solid #ff3d32;filter:drop-shadow(0 1px 2px #260000)}
 #toast{position:fixed;left:50%;top:72%;transform:translateX(-50%);background:#102b24cb;padding:12px 22px;border-left:2px solid var(--accent);font-size:12px;opacity:0;pointer-events:none;transition:opacity .15s}
 #debug{position:fixed;left:36px;top:184px;white-space:pre;font:11px/1.8 monospace;color:#d9efbe;background:#122c24d9;padding:14px;border:1px solid #a9d67466;display:none;pointer-events:none}
 #faults{position:fixed;top:96px;right:36px;max-width:440px;width:calc(100% - 72px);background:#331d16ed;color:#ffe0c1;border:1px solid #f4a36388;font-size:11px;z-index:10;display:none;padding:10px 14px}
@@ -248,6 +249,7 @@ let T, renderer, scene, camera, layout, weapon, api, solid = [], actors = [], en
 let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0;
 let ammo = 30, reloadLeft = 0, cooldown = 0, recoil = 0, recoilSpeed = 0, hurt = 0, hit = 0, toastLeft = 0, walk = 0, fps = 60;
 let firing = false, dragging = false, muted = false, audio, last = 0, hudElapsed = 0;
+let hurtSource;
 const keys = new Set(), player = { position: null, health: 100, debug: false };
 player.body = { root: player, radius: .32, height: 1.75, vy: 0, grounded: false };
 const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
@@ -356,7 +358,12 @@ function effect(name, options) {
     e.duration ??= .1;
     if (!Number.isFinite(e.duration) || e.duration <= 0) throw Error('特效时长必须为正数');
     e.left = e.duration; e.name = name; e.rendered = false;
-    if (options.view) e.root.traverse(n => n.layers.set(1)); effects.push(e); scene.add(e.root);
+    if (options.view) e.root.traverse(n => n.layers.set(1));
+    scene.add(e.root); if (options.parent) options.parent.attach(e.root);
+    if (options.limit && effects.filter(item => item.name === name).length >= options.limit) {
+      const oldest = effects.findIndex(item => item.name === name); dispose(effects[oldest].root); effects.splice(oldest, 1);
+    }
+    effects.push(e);
   } catch (error) { disabledEffects.add(name); report('特效 ' + name, error); }
 }
 let soundOutput, shotNoise;
@@ -371,11 +378,11 @@ function soundVoice(source, duration, volume, delay = 0, filter) {
   source.onended = () => { source.disconnect(); filter?.disconnect(); gain.disconnect(); };
   source.start(t); source.stop(t + duration);
 }
-function tone(frequency, duration = .08, volume = .035, delay = 0, endFrequency = 45) {
+function tone(frequency, duration = .08, volume = .035, delay = 0, endFrequency = 45, type = 'triangle') {
   if (muted || audio?.state !== 'running' || !soundOutput) return;
   guarded('音效', () => {
     const osc = audio.createOscillator(), t = audio.currentTime + delay;
-    osc.type = 'triangle'; osc.frequency.setValueAtTime(frequency, t); osc.frequency.exponentialRampToValueAtTime(endFrequency, t + duration);
+    osc.type = type; osc.frequency.setValueAtTime(frequency, t); osc.frequency.exponentialRampToValueAtTime(endFrequency, t + duration);
     soundVoice(osc, duration, volume, delay);
   });
 }
@@ -399,8 +406,17 @@ function gunSound(from, team) {
   });
 }
 function defeatSound() {
-  // 上行双音用于确认击败, 与普通受击提示区分, 只由首次死亡回调触发.
+  // 生命值首次归零时立即开始上行双音, 不等待倒地动画或模型清理.
   tone(660, .12, .06, 0, 660); tone(990, .22, .055, .09, 990);
+}
+function playerDefeatSound() {
+  tone(180, .65, .11, 0, 32, 'sine'); tone(360, .45, .045, 0, 60);
+}
+function reloadSound(stage) {
+  // 短促方波模拟弹匣退出, 插入和枪机复位的机械碰撞.
+  const frequency = [950, 650, 1450][stage];
+  tone(frequency, .045, .035, 0, 110, 'square');
+  tone(frequency * .6, .07, .025, .045, 70, 'square');
 }
 function finish(won) {
   mode = won ? 'won' : 'dead'; firing = false; keys.clear(); document.exitPointerLock?.();
@@ -408,10 +424,11 @@ function finish(won) {
   $('description').textContent = won ? `全部 ${total} 个敌方单位已清除.训练完成, 可以重新部署再次挑战.` : `本次已清除 ${kills} / ${total} 个敌方单位.利用掩体避开火力, 换个路线再试一次.`;
   $('menu-time').textContent = formatTime(time); $('menu-time-label').textContent = '本次用时';
 }
-function damagePlayer(amount) {
+function damagePlayer(amount, source) {
   if (player.debug || mode !== 'playing') return;
-  player.health = Math.max(0, player.health - amount); hurt = .7; tone(90, .12, .035);
-  if (!player.health) finish(false);
+  player.health = Math.max(0, player.health - amount); hurt = 1.1; hurtSource = source.clone();
+  if (!player.health) { playerDefeatSound(); finish(false); }
+  else tone(90, .12, .035);
 }
 function shoot(from, direction, team, damage) {
   gunSound(from, team);
@@ -429,17 +446,21 @@ function shoot(from, direction, team, damage) {
     const point = ray.ray.intersectBox(box, new T.Vector3());
     if (point && point.distanceTo(from) < distance) {
       end = point; distance = point.distanceTo(from); didHit = character = true;
-      normal.copy(direction).negate(); damagePlayer(damage);
+      normal.copy(direction).negate(); damagePlayer(damage, from);
     }
   } else if (contact) {
     let n = contact.object, headshot = false, actor;
     while (n) { headshot ||= n.userData.zone === 'head'; actor ||= n.userData.actor; n = n.parent; }
-    if (actor?.alive) { character = true; guarded('敌人受击 ' + actor.id, () => actor.damage(damage * (headshot ? 2 : 1), api)); hit = .12; tone(500, .045, .02); }
+    if (actor?.alive) {
+      character = true; guarded('敌人受击 ' + actor.id, () => actor.damage(damage * (headshot ? 2 : 1), api)); hit = .12;
+      if (actor.alive) tone(500, .045, .02);
+    }
   }
   const origin = team === 'player' && !weapon?.disabled && weapon?.muzzle ? weapon.muzzle.getWorldPosition(new T.Vector3()) : from;
   // 命中仍即时结算, 弹道与冲击仅负责视觉反馈, 近距离命中避免光束从墙后反向出现.
   effect('tracer', { from: from.distanceTo(origin) < distance ? origin : from, to: end, color: team === 'player' ? 0xffd779 : 0xff7945 });
   if (didHit) effect('impact', { position: end, normal, character });
+  if (team === 'player' && contact) effect('bulletmark', { position: end, normal, parent: contact.object, limit: 64 });
   return { distance: from.distanceTo(end), hit: didHit };
 }
 function playerFire() {
@@ -456,7 +477,7 @@ function playerFire() {
   }
   pitch = clamp(pitch + .007, -1.5, 1.5);
 }
-function reload() { if (mode === 'playing' && ammo < 30 && reloadLeft <= 0) { reloadLeft = 1.65; tone(280, .09); tell('更换弹匣'); } }
+function reload() { if (mode === 'playing' && ammo < 30 && reloadLeft <= 0) { reloadLeft = 1.65; reloadSound(0); tell('更换弹匣'); } }
 function createInstance(data) {
   if (!data || typeof data.id !== 'string' || entries.some(e => e.id === data.id)) throw Error('实例 ID 缺失或重复');
   const factory = FPS.models[data.model]; if (typeof factory !== 'function') throw Error('模型不可用: ' + data.model);
@@ -610,7 +631,12 @@ function frame(stamp) {
     // 弹簧回正保留每次射击的后坐冲量, 小步积分避免低帧率下动画失稳.
     const recoilSteps = Math.max(1, Math.ceil(dt * 120)), step = dt / recoilSteps;
     for (let i = 0; i < recoilSteps; i++) { recoilSpeed += (-180 * recoil - 22 * recoilSpeed) * step; recoil += recoilSpeed * step; }
-    if (reloadLeft > 0) { reloadLeft = Math.max(0, reloadLeft - dt); if (!reloadLeft) { ammo = 30; tone(350, .07); } }
+    if (reloadLeft > 0) {
+      const previous = reloadLeft; reloadLeft = Math.max(0, reloadLeft - dt);
+      // 按游戏进度触发后续动作声, 暂停或死亡后不提前播放剩余阶段.
+      if (previous > .65 && reloadLeft <= .65) reloadSound(1);
+      if (!reloadLeft) { ammo = 30; reloadSound(2); }
+    }
     updatePlayer(dt); if (firing) playerFire();
     scene.updateMatrixWorld(true);
     for (const e of entries) if ((e.update || e.body) && !e.disabled) {
@@ -634,8 +660,14 @@ function frame(stamp) {
     catch (error) { disabledEffects.add(e.name); report('特效更新 ' + e.name, error); e.left = 0; }
     if (e.left <= 0) { dispose(e.root); effects.splice(i, 1); }
   }
-  api.flash.intensity *= Math.exp(-dt * 50); hurt = Math.max(0, hurt - dt * 1.6); hit = Math.max(0, hit - dt); toastLeft -= dt;
-  $('damage').style.opacity = hurt; $('crosshair').classList.toggle('hit', hit > 0); if (toastLeft <= 0) $('toast').style.opacity = 0;
+  api.flash.intensity *= Math.exp(-dt * 50); hurt = Math.max(0, hurt - (mode === 'paused' ? 0 : dt)); hit = Math.max(0, hit - dt); toastLeft -= dt;
+  if (hurt && hurtSource) {
+    // 将最近一次攻击来源投影到水平视角, 转身后箭头仍指向同一世界位置.
+    const dx = hurtSource.x - player.position.x, dz = hurtSource.z - player.position.z;
+    $('damage').style.transform = `rotate(${Math.atan2(dx * Math.cos(yaw) - dz * Math.sin(yaw), -dx * Math.sin(yaw) - dz * Math.cos(yaw))}rad)`;
+  }
+  $('damage').style.opacity = mode === 'playing' ? Math.min(1, hurt / .3) : 0;
+  $('crosshair').classList.toggle('hit', hit > 0); if (toastLeft <= 0) $('toast').style.opacity = 0;
   hudElapsed += dt; if (hudElapsed > .1) { updateHUD(); hudElapsed = 0; }
   updateBodyWireframes();
   renderer.render(scene, camera);

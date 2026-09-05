@@ -49,7 +49,11 @@ FPS.models.enemy = (() => {
       damage(amount, api) {
         if (!actor.alive) return;
         actor.health = Math.max(0, actor.health - amount); recoil = .5;
-        if (!actor.health) { actor.alive = false; bodyWire.visible = false; debugMeshes.forEach(w => w.visible = false); actor.state = 'dead'; api.killed(actor); }
+        if (!actor.health) {
+          // 先关闭存活状态并同步通知主程序, 死亡音效不依赖后续动画或清理.
+          actor.alive = false; actor.state = 'dead'; api.killed(actor);
+          bodyWire.visible = false; debugMeshes.forEach(w => w.visible = false);
+        }
       },
       update(dt, api) {
         if (!actor.alive) {

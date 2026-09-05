@@ -1,4 +1,4 @@
-// 命中位置的闪光, 飞散火花和短暂弹痕, 由主程序提供世界坐标和表面法线.
+// 命中位置的闪光和飞散火花, 由主程序提供世界坐标和表面法线.
 FPS.models.impact = (T, o) => {
   const root = new T.Group(), normal = o.normal.clone().normalize();
   root.position.copy(o.position).addScaledVector(normal, .015);
@@ -6,11 +6,9 @@ FPS.models.impact = (T, o) => {
   const color = o.character ? 0x8fe9ff : 0xffc76b;
   const flashMaterial = new T.MeshBasicMaterial({ color: 0xfff2d1, transparent: true, depthWrite: false, toneMapped: false, side: T.DoubleSide });
   const sparkMaterial = new T.MeshBasicMaterial({ color, transparent: true, depthWrite: false, toneMapped: false });
-  const markMaterial = new T.MeshBasicMaterial({ color: 0x242820, transparent: true, opacity: .7, depthWrite: false, side: T.DoubleSide });
   const plane = new T.PlaneGeometry(.09, .09), sparkGeometry = new T.BoxGeometry(.022, .022, .09);
-  const flash = new T.Mesh(plane, flashMaterial), mark = new T.Mesh(plane, markMaterial);
-  flash.position.z = .004; mark.visible = !o.character; mark.rotation.z = Math.random() * Math.PI;
-  root.add(mark, flash);
+  const flash = new T.Mesh(plane, flashMaterial);
+  flash.position.z = .004; root.add(flash);
   const sparks = [];
   for (let i = 0; i < 8; i++) {
     const angle = i / 8 * Math.PI * 2 + Math.random() * .4;
@@ -26,6 +24,6 @@ FPS.models.impact = (T, o) => {
     const t = progress * duration;
     for (const { mesh, velocity } of sparks) mesh.position.copy(velocity).multiplyScalar(t).addScaledVector(gravity, .5 * t * t);
     flash.scale.setScalar(1 + t * 12); flashMaterial.opacity = Math.exp(-t * 45);
-    sparkMaterial.opacity = (1 - progress) ** 2; markMaterial.opacity = .7 * (1 - progress);
+    sparkMaterial.opacity = (1 - progress) ** 2;
   } };
 };

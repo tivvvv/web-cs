@@ -7,7 +7,7 @@ window.FPS_LAYOUT = {
     floor: 'models/floor.js', building: 'models/building.js',
     container: 'models/container.js', barrier: 'models/barrier.js',
     rifle: 'models/rifle.js', enemy: 'models/enemy.js',
-    tracer: 'models/tracer.js', flash: 'models/flash.js', impact: 'models/impact.js'
+    tracer: 'models/tracer.js', flash: 'models/flash.js', impact: 'models/impact.js', bulletmark: 'models/bulletmark.js'
   },
   player: { position: [0, 0, 22], yaw: 0, pitch: -.025 },
   atmosphere: { sky: 0xc3cdc1, fogNear: 28, fogFar: 95, exposure: 1.12 },
