@@ -21,7 +21,7 @@ FPS.models.enemy = (() => {
       // 复用命中网格的几何体, 作为子节点自动继承关节动画和缩放, 显隐由主程序控制.
       const wire = new T.Mesh(geometry, debugMaterial); wire.visible = false; wire.renderOrder = 998;
       wire.raycast = () => {}; m.add(wire); debugMeshes.push(wire);
-      m.castShadow = m.receiveShadow = true; parent.add(m); return m;
+      m.castShadow = o.castShadow !== false; m.receiveShadow = true; parent.add(m); return m;
     };
     box(torso, [.64, .58, .34], [0, 1.22, 0], armor);
     box(torso, [.44, .34, .075], [0, 1.23, .2], joints);

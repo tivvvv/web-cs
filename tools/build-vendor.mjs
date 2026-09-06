@@ -6,10 +6,14 @@ await build({
     Scene, Group, Object3D, PerspectiveCamera, WebGLRenderer, Color, Fog,
     AmbientLight, HemisphereLight, DirectionalLight, PointLight,
     Vector3, Euler, Matrix4, Box3, Box3Helper, Raycaster,
-    Mesh, Line, BufferGeometry, BoxGeometry, CylinderGeometry, PlaneGeometry,
-    MeshStandardMaterial, MeshBasicMaterial, LineBasicMaterial, CanvasTexture,
+    Mesh, InstancedMesh, Line, LineSegments, BufferGeometry, Float32BufferAttribute,
+    BoxGeometry, CylinderGeometry, PlaneGeometry, SphereGeometry,
+    IcosahedronGeometry, TorusGeometry, Shape, ExtrudeGeometry,
+    MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, ShaderMaterial,
+    LineBasicMaterial, CanvasTexture, RepeatWrapping, BackSide,
     SRGBColorSpace, ACESFilmicToneMapping, PCFSoftShadowMap, DoubleSide
-  } from 'three';`, resolveDir: process.cwd() },
+  } from 'three';
+  export { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';`, resolveDir: process.cwd() },
   bundle: true, minify: true, format: 'iife', globalName: 'THREE',
   outfile: 'vendor/three.min.js', legalComments: 'eof',
 });

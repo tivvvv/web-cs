@@ -17,7 +17,7 @@ async function check(name, fn) { await fn(); console.log('PASS', name); checks++
 async function open(dir = root, fatal = false) {
   const page = await context.newPage(); const network = [];
   page.on('request', r => { if (/^https?:/.test(r.url())) network.push(r.url()); });
-  await page.goto(pathToFileURL(join(dir, 'index.html')).href);
+  await page.goto(pathToFileURL(join(dir, 'index.html')).href + '?scene=industrial');
   if (fatal) await page.waitForFunction(() => document.querySelector('#fault-list').textContent.length > 0);
   else await page.waitForFunction(() => FPS.inspect?.().ready);
   assert.deepEqual(network, [], 'Game must not request online assets'); return page;
