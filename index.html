@@ -478,10 +478,10 @@ function shoot(from, direction, team, damage) {
       normal.copy(direction).negate(); damagePlayer(damage, from);
     }
   } else if (contact) {
-    let n = contact.object, headshot = false, actor;
-    while (n) { headshot ||= n.userData.zone === 'head'; actor ||= n.userData.actor; n = n.parent; }
+    let n = contact.object, zone, actor;
+    while (n) { zone ||= n.userData.zone; actor ||= n.userData.actor; n = n.parent; }
     if (actor?.alive) {
-      character = true; guarded('敌人受击 ' + actor.id, () => actor.damage(damage * (headshot ? 2 : 1), api)); hit = .12;
+      character = true; guarded('敌人受击 ' + actor.id, () => actor.damage(damage * (zone === 'head' ? 2 : zone === 'leg' ? .75 : 1), api)); hit = .12;
       if (actor.alive) tone(500, .045, .02);
     }
   }

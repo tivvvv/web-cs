@@ -32,6 +32,7 @@ FPS.models.enemy = (() => {
     const legs = [], arms = [], knees = [];
     for (const side of [-1, 1]) {
       const leg = new T.Group(); leg.position.set(side * .19, .82, 0); root.add(leg); legs.push(leg);
+      leg.userData.zone = 'leg'; // 大腿, 小腿和脚沿父节点继承命中部位, 不受行走动画影响.
       box(leg, [.23, .36, .25], [0, -.18, 0], armor);
       const knee = new T.Group(); knee.position.y = -.36; leg.add(knee); knees.push(knee);
       box(knee, [.19, .32, .22], [0, -.16, 0], joints);
