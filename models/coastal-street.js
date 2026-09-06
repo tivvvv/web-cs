@@ -1,4 +1,4 @@
-// 海边街道设施. 同文件提供路栏, 站外导向牌, 凸面镜, 石墙和民居变体.
+// 海边街道设施. 同文件提供路栏, 站外导向牌, 凸面镜和石墙变体.
 FPS.models.coastalStreet = (T, options = {}) => {
   const root = new T.Group(), parts = new Map();
   const mat = (color, roughness = .8, metalness = 0) => new T.MeshStandardMaterial({ color, roughness, metalness });
@@ -83,21 +83,6 @@ FPS.models.coastalStreet = (T, options = {}) => {
       box([.47, .213, .445], [0, .12 + row * .23, -length / 2 + .24 + j * .47 + (row % 2) * .08], stone);
     }
     box([.54, .10, length + .1], [0, height, 0], cream);
-  } else if (options.kind === 'house') {
-    box([6, 5.4, 7], [0, 2.7, 0], cream);
-    box([6.15, .15, 7.15], [0, 2.95, 0], dark);
-    for (const side of [-1, 1]) box([3.7, .18, 7.8], [side * 1.67, 5.83, 0], dark, [0, 0, -side * .29]);
-    for (const y of [1.75, 4.12]) for (const x of [-1.65, 1.65]) {
-      box([1.52, 1.35, .04], [x, y, 3.53], iron);
-      box([1.38, 1.21, .03], [x, y, 3.56], green);
-      box([.045, 1.28, .04], [x, y, 3.585], cream);
-      box([1.52, .055, .04], [x, y, 3.585], cream);
-      box([1.9, .08, .6], [x, y + .77, 3.7], dark, [-.12, 0, 0]);
-    }
-    box([1.03, 2.16, .07], [0, 1.08, 3.55], dark);
-    box([.48, .73, .34], [2.6, .63, 3.68], iron);
-    for (let j = 0; j < 9; j++) box([.37, .027, .04], [2.6, .36 + j * .065, 3.865], dark);
-    for (const x of [-2.85, 2.85]) cylinder(.045, 5.4, [x, 2.7, 3.56], iron);
   }
   for (const [m, geometries] of parts) {
     const mesh = new T.Mesh(T.mergeGeometries(geometries.map(g => g.index ? g.toNonIndexed() : g)), m);

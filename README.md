@@ -43,6 +43,7 @@ FPS.models.beacon = (T, options) => {
 
 ## 必要接口与边界
 
+- 清空敌人后结算胜利. 游玩中按 U 移除所有敌人 (不触发胜利), 再按 U 按初始配置满血刷新并重置击杀数; 不重置玩家状态.
 - 常驻动画可返回 `update(dt, api)`, 仅在游戏进行时更新, `dt` 单位秒; 不创建计时器或额外动画循环. 静态模型不必提供回调.
 - `attach: 'camera'` 挂载第一人称武器, 接收 `{ time, walk, recoil, reload }`, 可返回 `muzzle`. 参考 `rifle.js`; 保留两场景的主人物, 调试飞行时暂时隐藏武器.
 - 敌人返回 `alive`, `damage(amount, api)`, `update`; `damage` 会使实例计入敌方目标. API 有 `player`, `eye()`, `move(root, dx, dz, radius, height)`, `visible(from, to)`, `shoot(from, direction, team, damage)`, `effect(name, options)`, `killed(actor)`. 方向需归一化, `team` 为 `player` 或 `enemy`, 死亡只调用一次 `killed`.
@@ -55,5 +56,6 @@ FPS.models.beacon = (T, options) => {
 
 - 镰仓: `mode: 'combat'`, 4 名敌人, 复用 `enemy.js`; 电车停靠, 凸面镜为示意倒影. `kamakura-ground.js` 管轨道; 海面, 云, 岛屿, 花叶各有独立文件. 电线/裂纹合批, 天空后绘制以利用深度遮挡. `staticShadow` 缓存静态阴影, 敌人通过 `options.castShadow: false` 避免留下固定投影; 启用动态投影或移动光源时须关闭缓存. 性能参数为云 `steps` 和 `atmosphere.pixelRatio`.
 - 工业: `?scene=industrial`, 6 名敌人及出生点 4 个木箱. `mode: 'explore'` 会禁用射击并隐藏战斗 HUD, 不要误用于当前两场景.
+- 总图分四角和中心五区, 海滨车站暂按西南角规划, 其余四区留白分期制作; `regionPlan` 仅记录规划, 不生成占位内容. 本站区车站在低处, 12 级台阶通往高 2.4 米的住宅台地; 尺寸/摆放/碰撞统一在 `scene-kamakura.js` 的 `neighborhood` 配置, 造型在 `station-neighborhood.js`, 沙滩在 `coastal-beach.js`. 不再生成外围山坡和隧道.
 - B 开启免伤穿墙飞行与碰撞线框, Space/Ctrl 升降; 退出时检查支撑, 必要时回出生点. `FPS.inspect()` 查看实例/碰撞/错误. 单模块失败由页面错误面板报告并隔离, 不在 HTML 补兜底模型.
 - 默认只做语法/静态检查和 Git 差异检查. 实际运行由用户验证; 获得明确授权后才运行浏览器或 `npm test` (仅工业场景), 产物放已忽略的 `artifacts/`. 未运行必须如实说明.

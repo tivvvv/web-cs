@@ -19,7 +19,6 @@ FPS.models.kamakuraGround = T => {
   const asphalt = surface([92, 96, 99], 34, [5, 8]);
   const concrete = surface([165, 160, 144], 26, [8, 2]);
   const crossing = concrete.clone(); crossing.color.setHex(0xc8ccc9);
-  const sand = surface([174, 162, 134], 34, [12, 7]);
   const ballast = surface([99, 94, 88], 64, [25, 2]);
   const white = new T.MeshStandardMaterial({ color: 0xe9e3cd, roughness: .91 });
   const steel = new T.MeshStandardMaterial({ color: 0x72797b, roughness: .33, metalness: .82 });
@@ -42,14 +41,6 @@ FPS.models.kamakuraGround = T => {
     box([8.2, .17, .15], [0, .085, side * 2.225], concrete);
     box([.15, .17, 4.3], [side * 4.025, .085, 0], concrete);
   }
-  const beachGeometry = new T.PlaneGeometry(110, 28, 20, 16); beachGeometry.rotateX(-Math.PI / 2);
-  const beachPositions = beachGeometry.attributes.position;
-  for (let i = 0; i < beachPositions.count; i++) {
-    const z = beachPositions.getZ(i) - 32;
-    beachPositions.setXYZ(i, beachPositions.getX(i), -1.15 + (z + 18) * .047, z);
-  }
-  beachGeometry.computeVertexNormals();
-  const beach = new T.Mesh(beachGeometry, sand); beach.receiveShadow = true; root.add(beach);
   box([100, 2, .65], [0, -1, -18], concrete);
   // 白线略有磨损分段, 轨头, 轨腰和轨底分别建模.
   for (const x of [-3.45, 3.45]) {

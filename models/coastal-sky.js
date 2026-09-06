@@ -44,6 +44,9 @@ FPS.models.coastalSky = (T, options = {}) => {
         shape=max(shape,ellipsoid(p,vec3(-1.65,.65,-2.65),vec3(.95,.32,.62)));
         shape=max(shape,ellipsoid(p,vec3(-2.03,.88,-2.8),vec3(.37,.4,.45)));
         shape=max(shape,ellipsoid(p,vec3(-.15,.41,-4.9),vec3(2.9,.19,.62)));
+        // 补足海面正前方和住宅上空的云团, 沿用同一次步进, 不叠加第二层天空.
+        shape=max(shape,ellipsoid(p,vec3(-.25,.83,-2.65),vec3(.95,.3,.65)));
+        shape=max(shape,ellipsoid(p,vec3(.15,1.,2.6),vec3(1.2,.36,.85)));
         shape=max(shape,ellipsoid(p,vec3(3.2,.8,1.9),vec3(1.15,.56,1.2)));
         shape=max(shape,ellipsoid(p,vec3(-2.7,.72,2.2),vec3(.93,.47,.9)));
         if(shape<-.22) return 0.;

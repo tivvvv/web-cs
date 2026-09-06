@@ -39,17 +39,19 @@ FPS.models.coastalUtilities = (T, options = {}) => {
   // 街区线路只连接实际电杆, 沿岸终止于支架, 不再伸向海面后悬空截断.
   const rows = options.rows ?? [-15, 12, 54];
   for (const x of [-7.1, 8]) for (const [i, z] of rows.entries()) {
-    rod([x, 0, z], [x, 10.1, z], .14, pole);
-    rod([x - 1.05, 9.2, z], [x + 1.05, 9.2, z], .045, steel);
+    const y = options.rowHeights?.[i] ?? 0, previousY = options.rowHeights?.[i - 1] ?? 0;
+    const stem = (a, b, radius, mat) => rod([a[0], a[1] + y, a[2]], [b[0], b[1] + y, b[2]], radius, mat);
+    stem([x, 0, z], [x, 10.1, z], .14, pole);
+    stem([x - 1.05, 9.2, z], [x + 1.05, 9.2, z], .045, steel);
     for (const dx of [-.85, -.3, .3, .85]) {
-      rod([x + dx, 9.2, z], [x + dx, 9.62, z], .032, steel);
-      for (let j = 0; j < 4; j++) rod([x + dx, 9.35 + j * .055, z], [x + dx, 9.38 + j * .055, z], .067, ceramic);
-      if (i) wire([x + dx, 9.62, rows[i - 1]], [x + dx, 9.62, z], (z - rows[i - 1]) * .025);
+      stem([x + dx, 9.2, z], [x + dx, 9.62, z], .032, steel);
+      for (let j = 0; j < 4; j++) stem([x + dx, 9.35 + j * .055, z], [x + dx, 9.38 + j * .055, z], .067, ceramic);
+      if (i) wire([x + dx, previousY + 9.62, rows[i - 1]], [x + dx, y + 9.62, z], (z - rows[i - 1]) * .025);
     }
-    rod([x, 7.1, z], [x + .22, 7.1, z], .035, steel);
-    if (i) wire([x + .22, 7.1, rows[i - 1]], [x + .22, 7.1, z], (z - rows[i - 1]) * .035);
-    rod([x, 7.2, z], [x + 1.8, 7.5, z], .038, steel);
-    rod([x + 1.8, 7.5, z], [x + 2.3, 7.48, z], .11, ceramic);
+    stem([x, 7.1, z], [x + .22, 7.1, z], .035, steel);
+    if (i) wire([x + .22, previousY + 7.1, rows[i - 1]], [x + .22, y + 7.1, z], (z - rows[i - 1]) * .035);
+    stem([x, 7.2, z], [x + 1.8, 7.5, z], .038, steel);
+    stem([x + 1.8, 7.5, z], [x + 2.3, 7.48, z], .11, ceramic);
   }
   // 所有线缆共用一次绘制, 各跨之间不额外连线.
   root.add(new T.LineSegments(new T.BufferGeometry().setFromPoints(cablePoints), cable));

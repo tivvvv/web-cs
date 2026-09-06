@@ -211,7 +211,7 @@ body[data-freeplay="true"] .mission,body[data-freeplay="true"] .radar{display:no
 </div>
 <div class="weapon-line">5.56 MM · AUTOMATIC</div>
 </div>
-<div class="hud-help">SPACE 跳跃  SHIFT 奔跑  R 换弹  B 调试  ESC 暂停</div>
+<div class="hud-help">SPACE 跳跃  SHIFT 奔跑  R 换弹  B 调试  U 敌人开关  ESC 暂停</div>
 <div class="crosshair" id="crosshair">
 </div>
 </div>
@@ -255,6 +255,7 @@ let T, renderer, scene, camera, layout, weapon, api, solid = [], actors = [], en
 let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0;
 let ammo = 30, reloadLeft = 0, cooldown = 0, recoil = 0, recoilSpeed = 0, hurt = 0, hit = 0, toastLeft = 0, walk = 0, fps = 60;
 let firing = false, dragging = false, muted = false, audio, last = 0, hudElapsed = 0;
+let enemiesEnabled = true, enemySpawns = [];
 let hurtSource;
 const keys = new Set(), player = { position: null, health: 100, debug: false };
 player.body = { root: player, radius: .32, height: 1.75, vy: 0, grounded: false };
@@ -546,6 +547,27 @@ function createInstance(data) {
   if (data.attach === 'camera') { weapon = instance; root.traverse(n => n.layers.set(1)); root.visible = false; }
   entries.push(instance); return instance;
 }
+// 仅在按键时重建敌人, 复用工厂缓存的几何/材质, 不增加逐帧分支.
+function toggleEnemies() {
+  if (!ready || mode !== 'playing') return;
+  if (!enemySpawns.length) { tell('当前场景未配置敌人'); return; }
+  const removed = new Set(actors);
+  for (let i = effects.length - 1; i >= 0; i--) {
+    for (let n = effects[i].root; n; n = n.parent) if (removed.has(n.userData.actor)) {
+      dispose(effects[i].root); effects.splice(i, 1); break;
+    }
+  }
+  // 敌人共用缓存资源, 只移除实例节点, 不 dispose 仍会用于刷新的共享几何和材质.
+  for (const a of actors) { a.root.removeFromParent(); a.bodyWire?.removeFromParent(); }
+  entries = entries.filter(e => !removed.has(e)); solid = solid.filter(s => !removed.has(s.root.userData.actor));
+  actors = []; kills = 0; enemiesEnabled = !enemiesEnabled;
+  if (enemiesEnabled) for (const data of enemySpawns) guarded('刷新敌人 ' + data.id, () => createInstance(data));
+  total = actors.length; $('target-total').textContent = String(total).padStart(2, '0');
+  if (enemiesEnabled) separateBodies();
+  for (const light of scene.children) if (light.shadow) light.shadow.needsUpdate = true;
+  syncCollisionWireframes(); updateHUD();
+  tell(enemiesEnabled ? `已刷新 ${total} 名敌人` : '敌人已关闭 · 按 U 重新生成');
+}
 function toggleDebug() {
   if (!ready || mode !== 'playing') return;
   if (player.debug) {
@@ -620,9 +642,10 @@ $('sound').onclick = () => {
 document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) pause(); });
 document.addEventListener('keydown', e => {
   if (mode !== 'playing') return;
-  if (['Space', 'KeyB'].includes(e.code)) e.preventDefault();
+  if (['Space', 'KeyB', 'KeyU'].includes(e.code)) e.preventDefault();
   keys.add(e.code); if (e.repeat) return;
   if (e.code === 'KeyR') reload(); if (e.code === 'KeyB') toggleDebug();
+  if (e.code === 'KeyU') toggleEnemies();
   if (e.code === 'Escape') { pause(); document.exitPointerLock?.(); }
 });
 document.addEventListener('keyup', e => keys.delete(e.code));
@@ -649,7 +672,7 @@ function drawMap() {
 function updateHUD() {
   $('health').textContent = Math.ceil(player.health); $('health-bar').style.width = player.health + '%'; $('ammo').textContent = String(ammo).padStart(2, '0');
   $('ammo-state').textContent = reloadLeft > 0 ? `RELOADING / ${reloadLeft.toFixed(1)}s` : ammo ? 'AR-04 / READY' : 'EMPTY / R 换弹';
-  $('objective').textContent = `${kills} / ${total}`; $('clock').textContent = formatTime(time);
+  $('objective').textContent = enemiesEnabled ? `${kills} / ${total}` : '敌人已关闭 · U 刷新'; $('clock').textContent = formatTime(time);
   const heading = ((-yaw * 180 / Math.PI) % 360 + 360) % 360;
   $('compass').textContent = `· ${['N', 'E', 'S', 'W'][Math.round(heading / 90) % 4]} · ${Math.round(heading).toString().padStart(3, '0')} ·`;
   const p = player.position;
@@ -751,6 +774,7 @@ async function boot() {
   const instances = Array.isArray(layout.instances) ? layout.instances : [];
   if (!Array.isArray(layout.instances)) report('场景布局', 'instances 必须是数组');
   for (const data of instances) guarded('实例 ' + (data?.id || '?'), () => createInstance(data));
+  enemySpawns = actors.map(a => a.data);
   total = actors.length; $('target-total').textContent = String(total).padStart(2, '0');
   if (!solid.some(s => overlaps(api.spawn.clone().add(new T.Vector3(0, -.1, 0)), .1, .1, s.box))) {
     player.debug = true; document.body.dataset.debug = 'true'; tell('出生点无地面, 已启用自由飞行');
@@ -774,13 +798,13 @@ async function boot() {
     document.querySelector('.subbrand').textContent = 'COASTAL EXPLORATION';
     document.querySelector('.controls span:nth-child(2)').innerHTML = '<kbd>鼠标</kbd>观察';
     document.querySelector('.controls span:nth-child(3)').innerHTML = '<kbd>SPACE</kbd>跳跃';
-    document.querySelector('.hud-help').textContent = 'WASD 漫步  SPACE 跳跃  SHIFT 奔跑  B 自由飞行  ESC 暂停';
+    document.querySelector('.hud-help').textContent = 'WASD 漫步  SPACE 跳跃  SHIFT 奔跑  B 自由飞行  U 敌人开关  ESC 暂停';
   }
   if (!failures.size) $('system-status').textContent = 'SYSTEM ONLINE / 本地就绪';
   $('start-label').textContent = total ? '进入训练场' : '进入场景'; $('start').disabled = false; ready = true;
   window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
   // 提供状态和实例引用以便排查问题, 不创建额外的主循环.
-  FPS.inspect = () => ({ ready, mode, time, ammo, reloadLeft, kills, total, player, actors, entries, solid, camera, renderer, failures: [...failures] });
+  FPS.inspect = () => ({ ready, mode, time, ammo, reloadLeft, kills, total, enemiesEnabled, player, actors, entries, solid, camera, renderer, failures: [...failures] });
   renderer.setAnimationLoop(stamp => { try { frame(stamp); } catch (error) { report('主循环', error); } });
 }
 boot().catch(error => { report('初始化', error); $('start-label').textContent = '初始化失败 · 查看错误'; });

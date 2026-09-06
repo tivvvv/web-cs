@@ -1,4 +1,4 @@
-// 江之岛远景: 不规则海蚀岸线, 分层植被, 山顶展望灯塔, 海岸建筑与帆船.
+// 江之岛远景: 不规则海蚀岸线, 分层植被, 山顶展望灯塔与海岸建筑.
 FPS.models.enoshimaIsland = T => {
   const root = new T.Group(); let seed = 819;
   const random = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
@@ -55,12 +55,5 @@ FPS.models.enoshimaIsland = T => {
   }
   const ridgeGeo = new T.BufferGeometry(); ridgeGeo.setAttribute('position', new T.Float32BufferAttribute(ridge, 3)); ridgeGeo.setIndex(ridgeIndices); ridgeGeo.computeVertexNormals();
   root.add(new T.Mesh(ridgeGeo, new T.MeshBasicMaterial({ color: 0x8aaeb8, side: T.DoubleSide })));
-  for (const [x, z, scale] of [[-74, 410, 1], [39, 230, .7], [-260, 60, .8]]) {
-    const boat = new T.Group(); boat.position.set(x, .1, z); boat.scale.setScalar(scale); root.add(boat);
-    const hull = new T.Mesh(new T.SphereGeometry(1, 16, 8), pale); hull.scale.set(2, .35, .56); boat.add(hull);
-    const mast = new T.Mesh(new T.CylinderGeometry(.024, .024, 5.2, 8), pale); mast.position.y = 2.6; boat.add(mast);
-    const sailGeo = new T.BufferGeometry(); sailGeo.setAttribute('position', new T.Float32BufferAttribute([0, 5, 0, 0, .65, 0, 2, .65, .15], 3)); sailGeo.computeVertexNormals();
-    boat.add(new T.Mesh(sailGeo, new T.MeshStandardMaterial({ color: 0xf3eedc, roughness: .9, side: T.DoubleSide })));
-  }
   return { root };
 };
