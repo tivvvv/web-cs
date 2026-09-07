@@ -34,7 +34,8 @@ FPS.models.coastalSky = (T, options = {}) => {
       }
       float ellipsoid(vec3 p,vec3 c,vec3 r) { return 1.-length((p-c)/r); }
       float density(vec3 world) {
-        vec3 p=world*.0025; p.x-=uTime*.0007;
+        // 沿 +X 以约 1.6 米/秒平移云场, 沿用现有步进与光照计算.
+        vec3 p=world*.0025; p.x-=uTime*.004;
         // 右侧高耸积云有宽阔云底和不对称云塔, 左侧云带留出蓝天.
         float shape=ellipsoid(p,vec3(1.9,.67,-2.85),vec3(1.45,.43,.72));
         shape=max(shape,ellipsoid(p,vec3(2.05,1.08,-2.95),vec3(.93,.75,.63)));
