@@ -229,7 +229,7 @@ body[data-freeplay="true"] .mission,body[data-freeplay="true"] .radar{display:no
 </details>
 <script>
 'use strict';
-// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, damage?, alive?, muzzle?, debugMeshes?, bodyWire?}.
+// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, beforeRender?, render?, dispose?, onHit?, damage?, alive?, muzzle?, debugMeshes?, bodyWire?}.
 // 隔离可选模块的回调异常. 主程序统一维护唯一主循环和通用游戏规则.
 window.FPS = { models: Object.create(null) };
 const $ = id => document.getElementById(id), failures = new Set();
@@ -251,7 +251,7 @@ function load(path) {
     script.onerror = () => { report(path, '文件不存在或无法加载'); finish(false); }; document.head.append(script);
   });
 }
-let T, renderer, scene, camera, layout, weapon, api, solid = [], actors = [], entries = [], effects = [], helpers = [];
+let T, renderer, scene, camera, layout, weapon, api, renderEffect, solid = [], actors = [], entries = [], effects = [], helpers = [];
 let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0;
 let ammo = 30, reloadLeft = 0, cooldown = 0, recoil = 0, recoilSpeed = 0, hurt = 0, hit = 0, toastLeft = 0, walk = 0, fps = 60;
 let firing = false, dragging = false, muted = false, audio, last = 0, hudElapsed = 0;
@@ -460,7 +460,7 @@ function shoot(from, direction, team, damage) {
   // 装饰线的拾取有距离容差, 不能用作弹痕表面; 只接受真实三角面命中.
   const ray = new T.Raycaster(from, direction, .025, 100), contact = ray.intersectObjects(targets, true).find(hit => hit.object.isMesh && hit.face);
   let distance = contact?.distance ?? 100, end = contact ? contact.point.clone() : from.clone().addScaledVector(direction, distance);
-  let didHit = !!contact, character = false;
+  let didHit = !!contact, character = false, bulletmark = true;
   const normal = direction.clone().negate();
   if (contact) {
     const world = contact.object.matrixWorld.clone();
@@ -486,11 +486,19 @@ function shoot(from, direction, team, damage) {
       if (actor.alive) tone(500, .045, .02);
     }
   }
+  if (contact && !character) {
+    let n = contact.object;
+    while (n && !n.userData.hitTarget) n = n.parent;
+    const target = n?.userData.hitTarget;
+    if (target && !target.disabled) guarded(target.id + ' 命中', () => {
+      bulletmark = target.onHit({ ...contact, direction, normal, damage, team }, api)?.bulletmark !== false;
+    });
+  }
   const origin = team === 'player' && !weapon?.disabled && weapon?.muzzle ? weapon.muzzle.getWorldPosition(new T.Vector3()) : from;
   // 命中仍即时结算, 弹道与冲击仅负责视觉反馈, 近距离命中避免光束从墙后反向出现.
   effect('tracer', { from: from.distanceTo(origin) < distance ? origin : from, to: end, color: team === 'player' ? 0xffd779 : 0xff7945 });
   if (didHit) effect('impact', { position: end, normal, character });
-  if (team === 'player' && contact) effect('bulletmark', { position: end, normal, parent: contact.object, limit: 64 });
+  if (team === 'player' && contact && bulletmark) effect('bulletmark', { position: end, normal, direction, parent: contact.object, limit: 64 });
   return { distance: from.distanceTo(end), hit: didHit };
 }
 function playerFire() {
@@ -532,18 +540,22 @@ function createInstance(data) {
   }
   if (data.attach && data.attach !== 'camera') throw Error('未知挂载目标');
   const instance = factory(T, data.options || {}); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
-  for (const callback of ['update', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
+  for (const callback of ['update', 'beforeRender', 'render', 'dispose', 'onHit', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
   if (instance.muzzle !== undefined && !instance.muzzle?.isObject3D) throw Error('枪口必须为 Object3D');
   if (body && typeof instance.damage !== 'function') throw Error('动态身体需要角色伤害接口');
   if (instance.bodyWire !== undefined && !instance.bodyWire?.isObject3D) throw Error('身体线框必须为 Object3D');
   if (instance.debugMeshes !== undefined && (!Array.isArray(instance.debugMeshes) || instance.debugMeshes.some(n => !n?.isObject3D))) throw Error('调试网格必须为 Object3D 数组');
+  if (instance.render) { if (renderEffect) throw Error('每个场景只允许一个渲染模块'); renderEffect = instance; }
   const root = instance.root; root.position.set(...position); root.rotation.set(...rotation); root.scale.set(...scale);
+  // 预计算局部包围盒, 让射线先排除未穿过的网格, 避免视线检测遍历整片地面三角形.
+  root.traverse(n => { if (n.isMesh && !n.geometry.boundingBox) n.geometry.computeBoundingBox(); });
   root.name = data.id; instance.id = data.id; instance.data = data;
   if (body) { body.root = root; body.spawn = root.position.clone(); instance.body = body; }
   if (instance.bodyWire) { instance.bodyWire.visible = false; scene.add(instance.bodyWire); }
   (data.attach === 'camera' ? camera : scene).add(root); root.updateWorldMatrix(true, true);
   for (const box of boxes) solid.push({ root, box: box.applyMatrix4(root.matrixWorld), id: data.id });
   if (typeof instance.damage === 'function') { root.userData.actor = instance; actors.push(instance); }
+  if (instance.onHit) root.userData.hitTarget = instance;
   if (data.attach === 'camera') { weapon = instance; root.traverse(n => n.layers.set(1)); root.visible = false; }
   entries.push(instance); return instance;
 }
@@ -679,6 +691,18 @@ function updateHUD() {
   $('debug').textContent = `DEBUG / FREE FLIGHT\n玩家脚底坐标 (m)\nX  ${p.x.toFixed(2)}\nY  ${p.y.toFixed(2)}\nZ  ${p.z.toFixed(2)}\nFPS ${fps.toFixed(0)}  DRAW ${renderer.info.render.calls}\nYAW ${heading.toFixed(1)}  PITCH ${(pitch * 180 / Math.PI).toFixed(1)}\nWASD 镜头方向 · SPACE / CTRL 升降\nSHIFT 加速 · B 退出\n玩家碰撞半径 0.32 m\n绿 静态 / 青 身体 / 橙 命中\n模块 ${Object.keys(FPS.models).length}  异常 ${failures.size}`;
   drawMap();
 }
+// 可选模块接管世界画面, 失败时恢复普通渲染; 武器和界面仍由通用流程覆盖.
+function renderWorld() {
+  for (const e of entries) if (e.beforeRender && !e.disabled) {
+    try { e.beforeRender(renderer, scene, camera); }
+    catch (error) { e.disabled = true; report(e.id + ' 预渲染', error); guarded(e.id + ' 清理', () => e.dispose?.()); }
+  }
+  if (renderEffect && !renderEffect.disabled) {
+    try { return renderEffect.render(renderer, scene, camera); }
+    catch (e) { renderEffect.disabled = true; renderer.setRenderTarget(null); report(renderEffect.id, e); renderEffect.dispose?.(); }
+  }
+  renderer.render(scene, camera);
+}
 function frame(stamp) {
   const dt = Math.min((stamp - (last || stamp)) / 1000, .05); last = stamp; fps += ((1 / Math.max(dt, .001)) - fps) * .05;
   if (mode === 'playing') {
@@ -725,7 +749,7 @@ function frame(stamp) {
   $('crosshair').classList.toggle('hit', hit > 0); if (toastLeft <= 0) $('toast').style.opacity = 0;
   hudElapsed += dt; if (hudElapsed > .1) { updateHUD(); hudElapsed = 0; }
   updateBodyWireframes();
-  renderer.render(scene, camera);
+  renderWorld();
   // 绘制第一人称武器前仅清除深度, 避免穿墙并保留武器自身的遮挡关系.
   if (weapon?.root.visible) {
     const background = scene.background; scene.background = null;
@@ -757,7 +781,7 @@ async function boot() {
     if (light.isDirectionalLight) {
       light.target.position.set(...tuple(l.target, [0, 0, 0])); scene.add(light.target); light.castShadow = !!l.shadow;
       const extent = l.shadowExtent || 38;
-      Object.assign(light.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 1, far: l.shadowFar || 90 }); light.shadow.mapSize.set(2048, 2048); light.shadow.bias = -.0004; light.shadow.normalBias = .035;
+      Object.assign(light.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 1, far: l.shadowFar || 90 }); light.shadow.mapSize.set(2048, 2048); light.shadow.bias = l.shadowBias ?? -.0004; light.shadow.normalBias = .035;
       light.shadow.autoUpdate = !l.staticShadow; light.shadow.needsUpdate = true;
     }
   });

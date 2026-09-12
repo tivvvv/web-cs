@@ -3,15 +3,15 @@ import { build } from 'esbuild';
 import { copyFile } from 'node:fs/promises';
 await build({
   stdin: { contents: `export {
-    Scene, Group, Object3D, PerspectiveCamera, WebGLRenderer, Color, Fog,
+    Scene, Group, Object3D, PerspectiveCamera, OrthographicCamera, WebGLRenderer, WebGLRenderTarget, Color, Fog,
     AmbientLight, HemisphereLight, DirectionalLight, PointLight,
-    Vector3, Euler, Matrix4, Box3, Box3Helper, Raycaster,
+    Vector2, Vector3, Euler, Matrix4, Box3, Box3Helper, Raycaster,
     Mesh, InstancedMesh, Line, LineSegments, BufferGeometry, Float32BufferAttribute,
     BoxGeometry, CylinderGeometry, PlaneGeometry, SphereGeometry,
     IcosahedronGeometry, TorusGeometry, Shape, ExtrudeGeometry,
     MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, ShaderMaterial,
-    LineBasicMaterial, CanvasTexture, RepeatWrapping, BackSide,
-    SRGBColorSpace, ACESFilmicToneMapping, PCFSoftShadowMap, DoubleSide
+    LineBasicMaterial, CanvasTexture, DepthTexture, HalfFloatType, UnsignedIntType, RepeatWrapping, BackSide,
+    SRGBColorSpace, ACESFilmicToneMapping, PCFSoftShadowMap, DoubleSide, ShaderChunk
   } from 'three';
   export { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';`, resolveDir: process.cwd() },
   bundle: true, minify: true, format: 'iife', globalName: 'THREE',

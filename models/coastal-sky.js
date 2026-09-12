@@ -4,7 +4,7 @@ FPS.models.coastalSky = (T, options = {}) => {
   const steps = Math.max(24, Math.min(80, Math.round(options.steps || 48)));
   const material = new T.ShaderMaterial({
     side: T.BackSide, depthWrite: false,
-    uniforms: { uTime: { value: 0 }, uSun: { value: new T.Vector3(-.48, .72, -.32).normalize() } },
+    uniforms: { uTime: { value: 0 }, uSun: { value: new T.Vector3(...(options.sun ?? [-32, 48, -21])).normalize() } },
     vertexShader: `
       varying vec3 vWorld;
       void main() {
