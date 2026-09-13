@@ -247,7 +247,8 @@ function load(path) {
     const script = document.createElement('script'); let settled = false;
     const finish = ok => { if (settled) return; settled = true; clearTimeout(timer); resolve(ok); };
     const timer = setTimeout(() => { script.remove(); report(path, '加载超时'); finish(false); }, 7000);
-    script.src = path; script.onload = () => finish(true);
+    // file:// 资源没有缓存校验头, 浏览器会长期复用旧脚本; 每次启动附加版本戳强制取最新文件.
+    script.src = path + '?v=' + (load.stamp ??= Date.now()); script.onload = () => finish(true);
     script.onerror = () => { report(path, '文件不存在或无法加载'); finish(false); }; document.head.append(script);
   });
 }

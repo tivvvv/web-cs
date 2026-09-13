@@ -1,4 +1,4 @@
-// 石灯笼, 柱身与四面开口灯室为实体结构; 不使用实时灯光.
+// 石灯笼, 柱身与四面开口灯室为实体结构; 灯芯为自发光渐变盒, 不使用实时灯光.
 FPS.models.stoneLantern = T => {
   const root = new T.Group(), parts = [];
   function add(g, c) {
@@ -16,5 +16,14 @@ FPS.models.stoneLantern = T => {
   add(new T.CylinderGeometry(.15, .72, .32, 4).rotateY(Math.PI / 4).translate(0, 2.01, 0), 0x919e8e);
   add(new T.SphereGeometry(.12, 8, 6).scale(1, 1.4, 1).translate(0, 2.25, 0), 0xb0b7a3);
   const mesh = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
-  mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); parts.forEach(g => g.dispose()); return { root };
+  mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); parts.forEach(g => g.dispose());
+  // 灯芯用径向渐变贴图的无光照材质, 透过四面开口看到暖光; 不参与射击命中.
+  const glowCanvas = document.createElement('canvas'); glowCanvas.width = glowCanvas.height = 64;
+  const g2 = glowCanvas.getContext('2d'), grad = g2.createRadialGradient(32, 34, 3, 32, 32, 45);
+  grad.addColorStop(0, '#ffe8b8'); grad.addColorStop(.55, '#f2a94e'); grad.addColorStop(1, '#b85c22');
+  g2.fillStyle = grad; g2.fillRect(0, 0, 64, 64);
+  const glowMap = new T.CanvasTexture(glowCanvas); glowMap.colorSpace = T.SRGBColorSpace;
+  const glow = new T.Mesh(new T.SphereGeometry(.2, 12, 8).scale(1, .85, 1), new T.MeshBasicMaterial({ map: glowMap }));
+  glow.position.y = 1.69; glow.raycast = () => {}; root.add(glow);
+  return { root, dispose() { glowMap.dispose(); } };
 };

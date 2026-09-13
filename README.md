@@ -13,7 +13,7 @@
 | `models/` | 程序模型及其材质/纹理/动画; `rifle.js` 是主人物手臂与武器, `enemy.js` 是敌人行为 |
 | `tools/build-vendor.mjs` → `vendor/` | Three.js 精简导出与离线产物; 缺少 API 时补导出并执行 `npm run build:vendor`, 不手改产物 |
 
-加载链: 场景配置 → `catalog` 加载普通脚本 → `instances` 调用工厂 → `frame` 调用模型回调. 改造型只改模型, 改摆放只改场景, 只有通用能力缺失才改 HTML.
+加载链: 场景配置 → `catalog` 加载普通脚本 → `instances` 调用工厂 → `frame` 调用模型回调. 改造型只改模型, 改摆放只改场景, 只有通用能力缺失才改 HTML. `load()` 为所有脚本附加版本戳, 避免 file:// 缓存旧代码.
 
 ## 新增单文件 / 文件夹模块
 
@@ -61,6 +61,6 @@ FPS.models.beacon = (T, options) => {
 - 镰仓: `mode: 'combat'`, 4 名敌人, 复用 `enemy.js`; 电车停靠, 道口注意牌使用程序图案. `kamakura-ground.js` 管轨道; 海面, 云, 岛屿, 花叶各有独立文件. 电线/裂纹合批, 天空后绘制以利用深度遮挡. `staticShadow` 缓存环境阴影, `characterShadows` 用独立 1024² 深度图更新玩家附近的角色投影; 敌人 `castShadow: false` 避免被写入环境缓存. 移动光源时须关闭静态缓存. 性能参数为云 `steps` 和 `atmosphere.pixelRatio`.
 - 工业: `?scene=industrial`, 6 名敌人及出生点 4 个木箱. `mode: 'explore'` 会禁用射击并隐藏战斗 HUD, 不要误用于当前两场景.
 - 总图四角各 100×76 米, 中间留 20 米十字连接带与中心广场; 西南为现有海滨车站, 西北为神社公园, 东北商店街, 东南渔港. `scene-kamakura.js` 的 `regionPlan` 记录分区; `district-ground.js` 生成扩展三区和连接带的基础平地及外围挡墙, 顶面 Y=2.4, 通过站区北/东侧开口相连. 原站区坐标不变, 12 级楼梯连接低处车站与住宅台地; `neighborhood` 配置尺寸/碰撞, `station-neighborhood.js` 管台地, `coastal-beach.js` 管沙滩. 不生成外围山坡和隧道.
-- 西北公园位于 X=-49.3~49.3, Z=78~153.4, 从住宅北口沿参道进入; `scene-kamakura.js` 的 `parkSurfaces` 管草地/石板/砂砾分区. 新增模型为 `shrine-park-ground`, `shrine-torii`, `park-shrine`, `temizuya`, `park-pavilion`, `stone-lantern`, `park-sign`, 均为独立静态文件; 树池/乔木/长椅复用现有模型. 西侧枯山水 (`dry-garden` / `landscape-rocks`), 东侧花境 (`park-flowerbed`) 和绘马架 (`ema-rack`) 同样独立; 景石位置由 `gardenStones` 共用给砂纹与碰撞. 东侧湖面约 36×40 米, 用 `park-pond.js`; 横向步道由独立 `park-bridge.js` 的 40 米湖心三孔石拱桥连接 (拱高 2.4 米), 配置 `pondCut/shore` 共用挖地与碰撞, `parkSurfaces` 的 -1 表示留空; 岸线纹理初始化生成, 湖水细波纹与天空反光只更新模型时间参数, 复用太阳阴影且不增加反射渲染. `lake-fence.js` 用石柱木横栏衔接桥栏, 低栏外观与较高的防越界碰撞分开配置, 不开放下水; `pond-lotus.js` 管近岸荷叶/荷花, `water-iris.js` 管水生鸢尾; 中弹水花与水面涟漪各限 6 组. 东口接预留商街, 其余两区仍留白.
+- 西北公园位于 X=-49.3~49.3, Z=78~153.4, 从住宅北口沿参道进入; `scene-kamakura.js` 的 `parkSurfaces` 管草地/石板/砂砾分区. 新增模型为 `shrine-park-ground`, `shrine-torii`, `park-shrine`, `temizuya`, `park-pavilion`, `stone-lantern`, `park-sign`, 均为独立静态文件; 树池/乔木/长椅复用现有模型. 西侧枯山水 (`dry-garden` / `landscape-rocks`), 东侧花境 (`park-flowerbed`) 和绘马架 (`ema-rack`) 同样独立; 景石位置由 `gardenStones` 共用给砂纹与碰撞. 东侧湖面约 36×40 米, 用 `park-pond.js`; 横向步道由独立 `park-bridge.js` 的 40 米湖心三孔石拱桥连接 (拱高 2.4 米), 配置 `pondCut/shore` 共用挖地与碰撞, `parkSurfaces` 的 -1 表示留空; 岸线纹理初始化生成, 湖水细波纹与天空反光只更新模型时间参数, 复用太阳阴影且不增加反射渲染. `lake-fence.js` 用石柱木横栏衔接桥栏, 低栏外观与较高的防越界碰撞分开配置, 不开放下水; `pond-lotus.js` 管近岸荷叶/荷花, `water-iris.js` 管水生鸢尾; 中弹水花与水面涟漪各限 6 组; `pond-koi.js` 管湖心锦鲤巡游与定时跃出水面 (起跳落水各触发一次 `waterSplash`), 巡游避开桥带与水中景石, 拖尾涟漪用自有对象池不占用中弹水位, 石灯笼灯室为自发光渐变芯, 仍无实时灯光. 东口接预留商街, 其余两区仍留白.
 - B 开启免伤穿墙飞行与碰撞线框, Space/Ctrl 升降; 退出时检查支撑, 必要时回出生点. `FPS.inspect()` 查看实例/碰撞/错误. 单模块失败由页面错误面板报告并隔离, 不在 HTML 补兜底模型.
 - 默认只做语法/静态检查和 Git 差异检查. 实际运行由用户验证; 获得明确授权后才运行浏览器或 `npm test` (仅工业场景), 产物放已忽略的 `artifacts/`. 未运行必须如实说明.

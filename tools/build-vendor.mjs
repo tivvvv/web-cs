@@ -7,7 +7,7 @@ await build({
     AmbientLight, HemisphereLight, DirectionalLight, PointLight,
     Vector2, Vector3, Euler, Matrix4, Box3, Box3Helper, Raycaster,
     Mesh, InstancedMesh, Line, LineSegments, BufferGeometry, Float32BufferAttribute,
-    BoxGeometry, CylinderGeometry, PlaneGeometry, SphereGeometry,
+    BoxGeometry, CylinderGeometry, PlaneGeometry, SphereGeometry, ConeGeometry, RingGeometry,
     IcosahedronGeometry, TorusGeometry, Shape, ExtrudeGeometry,
     MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, ShaderMaterial,
     LineBasicMaterial, CanvasTexture, DepthTexture, HalfFloatType, UnsignedIntType, RepeatWrapping, BackSide,

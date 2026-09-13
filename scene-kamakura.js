@@ -115,6 +115,8 @@
   for (const [i, n] of [8, 15, 32].entries()) {
     const [x, z] = shore[n]; place('park-lotus-' + i, 'pondLotus', [pond.x + x * .84, height + pond.waterLevel, pond.z + z * .84], { seed: 81 + i * 31 });
   }
+  // 锦鲤在湖心区巡游, 活动半径避开近岸荷丛; 桥带与水石障碍让鱼绕行不穿模; 模型自带头尾摆动与涟漪.
+  place('park-koi', 'pondKoi', [pond.x, height + pond.waterLevel, pond.z], { radiusX: pond.width / 2 - 5.5, radiusZ: pond.depth / 2 - 5.5, count: 6, seed: 277, bridgeHalf: bridge.width / 2 + .8, obstacles: [[36 - pond.x, 134 - pond.z, 3]] });
   const pondRocks = [3, 8, 13, 18, 24, 29, 34, 38].map((n, i) => { const [x, z] = shore[n]; return [x * 1.008, z * 1.008, .65 + i % 3 * .13, .28 + i % 2 * .12, .6 + i % 3 * .1]; });
   place('park-pond-rocks', 'landscapeRocks', [pond.x, parkY, pond.z], { stones: pondRocks }, pondRocks.map(([x, z, w, h, d]) => box([w, h, d], [x, h / 2, z])));
   // 东北岸低景石扎入湖底, 水生花丛错落在岸内, 保留开阔水面.
@@ -416,7 +418,7 @@
       lowHedge: 'models/low-hedge.js', drinkingFountain: 'models/drinking-fountain.js',
       coastalBeach: 'models/coastal-beach.js', stationNeighborhood: 'models/station-neighborhood.js',
       districtGround: 'models/district-ground.js',
-      lakeFence: 'models/lake-fence.js', pondLotus: 'models/pond-lotus.js', waterSplash: 'models/water-splash.js',
+      lakeFence: 'models/lake-fence.js', pondLotus: 'models/pond-lotus.js', pondKoi: 'models/pond-koi.js', waterSplash: 'models/water-splash.js',
       waterIris: 'models/water-iris.js',
       parkBridge: 'models/park-bridge.js', parkPond: 'models/park-pond.js', parkFlowerbed: 'models/park-flowerbed.js', emaRack: 'models/ema-rack.js',
       dryGarden: 'models/dry-garden.js', landscapeRocks: 'models/landscape-rocks.js',

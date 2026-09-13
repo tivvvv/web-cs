@@ -1,4 +1,4 @@
-// 公园湖水, 岸线由场景共享给挖地与碰撞; 单次绘制水面, 复用太阳阴影, 无反射相机或屏幕采样.
+// 公园湖水, 岸线由场景共享给挖地与碰撞; 单次绘制水面, 复用太阳阴影, 无反射相机或屏幕采样; 半透明, 俯视可见水下鱼体.
 FPS.models.parkPond = (T, o = {}) => {
   const root = new T.Group(), { width: w, depth: d, shore, bottom: floor, waterLevel: waterY, rim: bankY } = o;
   const bank = new T.Shape(); bank.moveTo(-w / 2, -d / 2); bank.lineTo(w / 2, -d / 2); bank.lineTo(w / 2, d / 2); bank.lineTo(-w / 2, d / 2); bank.closePath();
@@ -14,7 +14,7 @@ FPS.models.parkPond = (T, o = {}) => {
   const bankGeometry = new T.ExtrudeGeometry(bank, { depth: bankY - floor, bevelEnabled: false, steps: 1 }).rotateX(-Math.PI / 2).translate(0, floor, 0);
   const uv = bankGeometry.attributes.uv, p = bankGeometry.attributes.position;
   for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / 2, p.getZ(i) / 2);
-  const rim = new T.Mesh(bankGeometry, [new T.MeshStandardMaterial({ color: 0x71884b, map, roughness: 1 }), new T.MeshStandardMaterial({ color: 0x666f59, roughness: 1 })]); rim.castShadow = rim.receiveShadow = true; root.add(rim);
+  const rim = new T.Mesh(bankGeometry, [new T.MeshStandardMaterial({ color: 0x5d7042, map, roughness: 1 }), new T.MeshStandardMaterial({ color: 0x46503c, roughness: 1 })]); rim.castShadow = rim.receiveShadow = true; root.add(rim);
   // 256² 数据纹理只在创建时计算; R 为离岸距离, G/B 为细颗粒与缓慢色差, 不作为颜色贴图解码.
   const shoreCanvas = document.createElement('canvas'); shoreCanvas.width = shoreCanvas.height = 256;
   const shoreCtx = shoreCanvas.getContext('2d'), shorePixels = shoreCtx.createImageData(256, 256);
@@ -38,7 +38,7 @@ FPS.models.parkPond = (T, o = {}) => {
   let impactSlot = 0; const hitLocal = new T.Vector3();
   const waterUniforms = { lakeHits: { value: impacts }, lakeTime: { value: 0 }, lakeShore: { value: shoreMap }, lakeSize: { value: new T.Vector2(w, d) } };
   // 复用标准材质的灯光/阴影绑定和顶点阶段, 片元只算湖水, 不执行额外 PBR 光照或反射相机.
-  const material = new T.MeshStandardMaterial({ roughness: .3 });
+  const material = new T.MeshStandardMaterial({ roughness: .3, transparent: true });
   material.customProgramCacheKey = () => 'park-lake-water-v2';
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, waterUniforms);
@@ -96,7 +96,7 @@ FPS.models.parkPond = (T, o = {}) => {
           color+=vec3(.88,.79,.60)*glint*(.55+.35*detail)*shadow;
         #endif
         color=mix(color,vec3(.56,.73,.73),min(.38,foam*.3)*(.7+.3*shadow));
-        gl_FragColor=vec4(color,1.);
+        gl_FragColor=vec4(color,.32+.5*fresnel);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
