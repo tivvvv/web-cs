@@ -460,7 +460,7 @@ function shoot(from, direction, team, damage) {
   // 装饰线的拾取有距离容差, 不能用作弹痕表面; 只接受真实三角面命中.
   const ray = new T.Raycaster(from, direction, .025, 100), contact = ray.intersectObjects(targets, true).find(hit => hit.object.isMesh && hit.face);
   let distance = contact?.distance ?? 100, end = contact ? contact.point.clone() : from.clone().addScaledVector(direction, distance);
-  let didHit = !!contact, character = false, bulletmark = true;
+  let didHit = !!contact, character = false, bulletmark = true, impact = true;
   const normal = direction.clone().negate();
   if (contact) {
     const world = contact.object.matrixWorld.clone();
@@ -491,13 +491,14 @@ function shoot(from, direction, team, damage) {
     while (n && !n.userData.hitTarget) n = n.parent;
     const target = n?.userData.hitTarget;
     if (target && !target.disabled) guarded(target.id + ' 命中', () => {
-      bulletmark = target.onHit({ ...contact, direction, normal, damage, team }, api)?.bulletmark !== false;
+      const response = target.onHit({ ...contact, direction, normal, damage, team }, api);
+      bulletmark = response?.bulletmark !== false; impact = response?.impact !== false;
     });
   }
   const origin = team === 'player' && !weapon?.disabled && weapon?.muzzle ? weapon.muzzle.getWorldPosition(new T.Vector3()) : from;
   // 命中仍即时结算, 弹道与冲击仅负责视觉反馈, 近距离命中避免光束从墙后反向出现.
   effect('tracer', { from: from.distanceTo(origin) < distance ? origin : from, to: end, color: team === 'player' ? 0xffd779 : 0xff7945 });
-  if (didHit) effect('impact', { position: end, normal, character });
+  if (didHit && impact) effect('impact', { position: end, normal, character });
   if (team === 'player' && contact && bulletmark) effect('bulletmark', { position: end, normal, direction, parent: contact.object, limit: 64 });
   return { distance: from.distanceTo(end), hit: didHit };
 }

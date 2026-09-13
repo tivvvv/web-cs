@@ -19,18 +19,179 @@
     active: 'southwest', cellSize: [100, 76], connectionWidth: 20, groundY: height,
     corners: [
       { id: 'southwest', name: '海滨车站', center: [0, 20], status: 'developed' },
-      { id: 'northwest', name: '神社与林间公园', center: [0, 116], status: 'flat' },
+      { id: 'northwest', name: '神社与林间公园', center: [0, 116], status: 'developed' },
       { id: 'northeast', name: '商店街与生活街区', center: [120, 116], status: 'flat' },
       { id: 'southeast', name: '渔港与仓储区', center: [120, 20], status: 'flat' }
     ],
     center: { name: '中央广场', position: [60, 68], size: [20, 20], status: 'flat' }
   };
-  const parcels = [...regionPlan.corners.slice(1).map(r => [...r.center, ...regionPlan.cellSize]), [60, 68, 20, 172], [0, 68, 100, 20], [120, 68, 100, 20]];
+  // 公园东半部湖区挖去原台地, 岸线共用于模型和岸边碰撞, 水下保留真实池底.
+  const pond = { x: 25, z: 123, width: 40, depth: 44, bottom: -.55, waterLevel: -.18, rim: .024 };
+  const pondCut = [pond.x - pond.width / 2, pond.z - pond.depth / 2, pond.x + pond.width / 2, pond.z + pond.depth / 2];
+  const shore = Array.from({ length: 40 }, (_, i) => { const a = i * Math.PI / 20; return [(pond.width / 2 - 2) * Math.cos(a) * (1 + .09 * Math.sin(a)), Math.round((pond.depth / 2 - 2) * Math.sin(a) * 10000) / 10000]; });
+
+  const parcels = [...[[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]), ...regionPlan.corners.slice(2).map(r => [...r.center, ...regionPlan.cellSize]), [60, 68, 20, 172], [0, 68, 100, 20], [120, 68, 100, 20]];
   const slabs = parcels.map(([x, z, w, d]) => box([w, height + .6, d], [x, (height - .6) / 2, z]));
+  slabs.push(box([pond.width, height + .6 + pond.bottom, pond.depth], [pond.x, (height + pond.bottom - .6) / 2, pond.z]));
   // 外围用简单实心挡墙, 不复制砖块细节; 内部地块相接, 无叠面或额外台阶.
   const edges = [box([220, 1.8, .54], [60, height + .9, 153.73]), box([.54, 1.8, 171.46], [169.73, height + .9, 67.73]),
     box([119.46, 1.8, .54], [109.73, height + .9, -17.73]), box([.54, 1.8, 95.41], [-49.6, height + .9, 105.755])];
   place('reserved-district-ground', 'districtGround', [0, 0, 0], { slabs, edges }, [...slabs, ...edges]);
+  // 西北公园: 南北参道, 西侧园林, 东侧湖面与北侧拜殿; 环路与东侧出口不封闭.
+  const parkY = height + .024;
+  const parkSurfaces = [
+    [-44, 81, -5.5, 113, 2], [5.5, 81, 44, 113, 2], [-44, 117, -14, 149, 2], [14, 117, 44, 149, 2],
+    [-3, 78, 3, 127, 1], [-32, 108, 3, 113, 1], [0, pond.z - 2, 49.3, pond.z + 2, 1], [-32, 86, -29, 143, 1], [45, 98, 48.5, 147.2, 1], [32, 98, 48.5, 101, 1],
+    [-32, 140, 5, 143, 1], [2.5, 140, 5, 147.2, 1], [2.5, 145, 48.5, 147.2, 1], [-13, 116, 13, 143, 0], [-3, 116, 3, 127, 1], [22, 94, 33, 104, 1], [-23, 102, -15, 108, 1], [3, 98.3, 22, 99.7, 1], [...pondCut, -1]
+  ];
+  const bankSlices = Math.ceil(pond.depth / .75);
+  const shoreRows = [...new Set([...shore.map(p => p[1]), ...Array.from({ length: bankSlices + 1 }, (_, i) => Math.round((-pond.depth / 2 + pond.depth * i / bankSlices) * 10000) / 10000)])].sort((a, b) => a - b), bankBoxes = [];
+  for (let i = 0; i < shoreRows.length - 1; i++) {
+    const z0 = shoreRows[i], z1 = shoreRows[i + 1], z = (z0 + z1) / 2, hits = [];
+    // 每段取两端和中部的水域范围, 岸边碰撞向陆地内收, 避免扩大后出现水面上的隐形地板.
+    for (const sample of [z0 + .000001, z, z1 - .000001]) shore.forEach(([x0, a], j) => {
+      const [x1, b] = shore[(j + 1) % shore.length];
+      if (sample > Math.min(a, b) && sample < Math.max(a, b)) hits.push(x0 + (x1 - x0) * (sample - a) / (b - a));
+    });
+    const spans = hits.length ? [[-pond.width / 2, Math.min(...hits)], [Math.max(...hits), pond.width / 2]] : [[-pond.width / 2, pond.width / 2]];
+    for (const [a, b] of spans) bankBoxes.push(box([b - a, pond.rim - pond.bottom, z1 - z0], [(a + b) / 2, (pond.rim + pond.bottom) / 2, z]));
+  }
+  place('park-pond', 'parkPond', [pond.x, height, pond.z], { ...pond, shore }, bankBoxes);
+  // 桥栏恢复正常观景比例, 防越界高度独立配置; 桥面与拱腹继续共用剖面和碰撞.
+  const bridge = { width: 3.4, length: pond.width, rise: 2.4, railHeight: 1.16, barrierHeight: 1.9, bottom: pond.bottom - pond.rim }, bridgeTop = x => .12 + bridge.rise * (1 - (2 * x / bridge.length) ** 2);
+  bridge.deck = Array.from({ length: bridge.length * 2 }, (_, i) => {
+    const x = -bridge.length / 2 + .25 + i * .5;
+    return box([.5, .12, bridge.width], [x, bridgeTop(x) - .06, 0]);
+  });
+  bridge.profile = Array.from({ length: bridge.length / 2.5 + 1 }, (_, i) => { const x = -bridge.length / 2 + i * 2.5; return [x, bridgeTop(x)]; });
+  bridge.arches = [[-19, -9], [-8, 8], [9, 19]].map(([left, right]) => ({ left, right, crown: bridgeTop((left + right) / 2) - .65 }));
+  const soffit = x => {
+    const a = bridge.arches.find(a => x >= a.left && x <= a.right);
+    return a ? bridge.bottom + (a.crown - bridge.bottom) * Math.sqrt(Math.max(0, 1 - ((2 * x - a.left - a.right) / (a.right - a.left)) ** 2)) : bridge.bottom;
+  };
+  bridge.body = bridge.deck.map(({ size, offset: [x, y] }) => ({ x0: x - .25, x1: x + .25, top: y - size[1] / 2, low0: soffit(x - .25), low1: soffit(x + .25) }));
+  const bridgeBody = bridge.body.map(s => {
+    const low = Math.max(s.low0, s.low1);
+    return box([s.x1 - s.x0, s.top - low, bridge.width], [(s.x0 + s.x1) / 2, (s.top + low) / 2, 0]);
+  });
+  const bridgeRails = bridge.profile.slice(1).flatMap(([x, y], i) => [-1, 1].map(side => {
+    const [px, py] = bridge.profile[i];
+    return box([x - px + .36, bridge.barrierHeight + Math.abs(y - py), .36], [
+      (x + px) / 2, Math.min(y, py) + (bridge.barrierHeight + Math.abs(y - py)) / 2, side * (bridge.width / 2 - .14)
+    ]);
+  }));
+  place('park-lake-bridge', 'parkBridge', [pond.x, parkY, pond.z], bridge, [...bridge.deck, ...bridgeRails, ...bridgeBody]);
+  for (const side of [-1, 1]) place('park-bridge-landing-' + side, 'pocketPaving', [pond.x + side * (bridge.length / 2 + 1), height, pond.z], { width: 2, depth: 4, stone: true }, [box([2, .078, 4], [0, .039, 0])]);
+  // 1.05 米景观低栏沿岸线闭合并接上桥栏; 同位置保留 2.1 米防越界碰撞, 不增加可见高墙.
+  const fence = {
+    height: 1.05, barrierHeight: 2.1, railDepth: .095,
+    postWidths: { base: .28, shaft: .2, cap: .27 }, segments: []
+  }, fencePoints = shore.map(([x, z]) => [x * 1.045, z * 1.045]);
+  for (let i = 0; i < fencePoints.length; i++) for (const side of [-1, 1]) {
+    let a = fencePoints[i], b = fencePoints[(i + 1) % fencePoints.length];
+    const edge = bridge.width / 2 - .14, da = a[1] * side - edge, db = b[1] * side - edge;
+    if (da < 0 && db < 0) continue;
+    if (da < 0 || db < 0) {
+      const t = da / (da - db), cut = [a[0] + (b[0] - a[0]) * t, side * edge];
+      if (da < 0) a = cut; else b = cut;
+    }
+    fence.segments.push([a, b]);
+  }
+  // 斜栏按横向误差最多 .1 米细分 AABB, 直栏无需细分; 木栏和石柱尺寸共用模型参数.
+  const fenceBoxes = [], fencePosts = new Map();
+  for (const [a, b] of fence.segments) {
+    const dx = b[0] - a[0], dz = b[1] - a[1], length = Math.hypot(dx, dz);
+    if (length < .0001) continue;
+    const count = Math.max(1, Math.ceil(Math.abs(dx * dz) / length / .1));
+    for (let i = 0; i < count; i++) fenceBoxes.push(box([
+      Math.abs(dx) / count + fence.railDepth * Math.abs(dz) / length, fence.barrierHeight,
+      Math.abs(dz) / count + fence.railDepth * Math.abs(dx) / length
+    ], [a[0] + dx * (i + .5) / count, fence.barrierHeight / 2, a[1] + dz * (i + .5) / count]));
+    for (const p of [a, b]) fencePosts.set(p.map(v => v.toFixed(4)).join(','), p);
+  }
+  const postWidth = Math.max(...Object.values(fence.postWidths));
+  for (const [x, z] of fencePosts.values()) fenceBoxes.push(box([postWidth, fence.barrierHeight, postWidth], [x, fence.barrierHeight / 2, z]));
+  place('park-lake-fence', 'lakeFence', [pond.x, parkY, pond.z], fence, fenceBoxes);
+  for (const [i, n] of [8, 15, 32].entries()) {
+    const [x, z] = shore[n]; place('park-lotus-' + i, 'pondLotus', [pond.x + x * .84, height + pond.waterLevel, pond.z + z * .84], { seed: 81 + i * 31 });
+  }
+  const pondRocks = [3, 8, 13, 18, 24, 29, 34, 38].map((n, i) => { const [x, z] = shore[n]; return [x * 1.008, z * 1.008, .65 + i % 3 * .13, .28 + i % 2 * .12, .6 + i % 3 * .1]; });
+  place('park-pond-rocks', 'landscapeRocks', [pond.x, parkY, pond.z], { stones: pondRocks }, pondRocks.map(([x, z, w, h, d]) => box([w, h, d], [x, h / 2, z])));
+  // 东北岸低景石扎入湖底, 水生花丛错落在岸内, 保留开阔水面.
+  const waterRocks = [[0, 0, 2.2, 1.05, 1.7], [-1.3, .5, 1.6, .72, 1.1], [.85, -.6, 1.3, .6, 1], [.15, 1, 1.1, .52, .9]];
+  place('park-water-rocks', 'landscapeRocks', [36, height + pond.bottom, 134], { stones: waterRocks }, waterRocks.map(([x, z, w, h, d]) => box([w, h, d], [x, h / 2, z])));
+  for (const [i, [x, z]] of [[37.5, 135.3], [13.2, 131], [32, 107.5]].entries()) {
+    place('park-water-iris-' + i, 'waterIris', [x, height + pond.bottom, z], { seed: 91 + i * 31 });
+  }
+  for (const [i, [x, z]] of [[12.5, 140.2], [37, 106]].entries()) {
+    place('park-pond-grass-' + i, 'parkFlowerbed', [x, parkY, z], { width: 1.6, depth: 1, height: 1.1, kind: 'grass', count: 16, seed: 431 + i }, [box([1.64, .09, 1.02], [0, .045, 0])]);
+  }
+  place('northwest-park-ground', 'shrineParkGround', [0, height, 0], { bounds: [-49.3, 78, 49.3, 153.4], surfaces: parkSurfaces });
+  place('park-station-link', 'pocketPaving', [0, height, 68], { width: 6, depth: 20, stone: true }, [box([6, .078, 20], [0, .039, 0])]);
+  place('park-east-link', 'pocketPaving', [59.65, height, pond.z], { width: 20.7, depth: 5, stone: true }, [box([20.7, .078, 5], [0, .039, 0])]);
+  place('park-torii', 'shrineTorii', [0, parkY, 86], {}, [
+    ...[-1, 1].flatMap(side => [box([.92, .16, .88], [side * 2.71, .08, 0]), box([.75, 4.5, .66], [side * 2.65, 2.35, 0])]),
+    box([6.7, .22, .34], [0, 3.72, 0]), box([7.6, .9, .65], [0, 4.65, 0])
+  ]);
+  place('park-entry-sign', 'parkSign', [-5, parkY, 81], {}, [box([1.94, 1.89, .32], [0, .945, 0])]);
+  const shrineBoxes = [box([10.8, .6, 9], [0, .3, -.6]), box([8.8, 3.3, 6], [0, 2.25, .1]), box([12, 2, 10.2], [0, 5.5, -.65]), box([1.65, .76, .74], [0, .98, -4.25])];
+  for (let i = 0; i < 4; i++) shrineBoxes.push(box([3.4, .15 * (i + 1), .45], [0, .075 * (i + 1), -6.675 + i * .45]));
+  for (const side of [-1, 1]) {
+    for (const z of [-4.75, -2.95, .1, 3.15]) shrineBoxes.push(box([.44, 4.4, .44], [side * 4.55, 2.8, z]));
+    shrineBoxes.push(box([.1, .69, 8.6], [side * 5.18, .945, -.6]));
+  }
+  place('park-shrine', 'parkShrine', [0, parkY, 134], {}, shrineBoxes);
+  place('park-temizuya', 'temizuya', [-19, parkY, 105.2], {}, [
+    box([4.2, .1, 3.5], [0, .05, 0]), box([2.1, 1.08, 1.13], [0, .64, 0]), box([4.3, 1.2, 3.85], [0, 3.55, 0]),
+    ...[-1.65, 1.65].flatMap(x => [-1.3, 1.3].map(z => box([.42, 2.95, .42], [x, 1.525, z])))
+  ]);
+  place('park-pavilion', 'parkPavilion', [27, parkY, 99], {}, [
+    box([6.6, .12, 5.8], [0, .06, 0]), box([7.1, 1.38, 6.3], [0, 3.96, 0]),
+    ...[-2.7, 2.7].flatMap(x => [-2.3, 2.3].map(z => box([.48, 3.2, .48], [x, 1.72, z]))),
+    ...[-2.42, 2.42].map(x => box([.58, .5, 3.4], [x, .37, 0]))
+  ]);
+  for (const [i, [x, z]] of [[-4.3, 96], [4.3, 96], [-4.3, 118.5], [4.3, 118.5]].entries()) {
+    place('park-stone-lantern-' + i, 'stoneLantern', [x, parkY, z], {}, [box([.95, .14, .95], [0, .07, 0]), box([.66, 1.75, .66], [0, 1.025, 0]), box([1.02, .72, 1.02], [0, 2.06, 0])]);
+  }
+  // 西侧枯山水: 石块与砂纹使用同一组局部坐标, 五块景石按大小与前后层次组合.
+  const gardenStones = [[-3.2, .2, 2, 1.2, 1.7], [-1.65, .9, 1.1, .6, .9], [1.5, -1.2, 1.65, 1.55, 1.4], [2.5, -.25, .9, .5, .8], [3.8, 2, 1.2, .75, 1]];
+  place('park-dry-garden', 'dryGarden', [-16, parkY, 98], { width: 12, depth: 8, stones: gardenStones }, [
+    box([12, .073, 8], [0, .0365, 0]), ...[-1, 1].flatMap(side => [box([12, .1, .16], [0, .05, side * 3.92]), box([.16, .1, 7.68], [side * 5.92, .05, 0])])
+  ]);
+  place('park-garden-stones', 'landscapeRocks', [-16, parkY + .073, 98], { stones: gardenStones }, gardenStones.map(([x, z, w, h, d]) => box([w, h, d], [x, h / 2, z])));
+  // 东侧花境分列短支路两侧, 低白花, 蓝紫花和观赏草形成高度层次, 不占木亭入口.
+  for (const [i, [x, z, w, d, h, kind, count]] of [[14.1, 96.5, 3.8, 2.1, .55, 'white', 48], [18.7, 96.3, 3.8, 2.5, .85, 'blue', 56], [16.7, 101.65, 7.4, 2.2, 1, 'grass', 84]].entries()) {
+    place('park-flower-border-' + i, 'parkFlowerbed', [x, parkY, z], { width: w, depth: d, height: h, kind, count, seed: 51 + i * 73 }, [box([w * 1.02, .09, d * 1.02], [0, .045, 0])]);
+  }
+  place('park-ema-rack', 'emaRack', [-9.6, parkY, 132.3], {}, [
+    ...[-1.45, 1.45].flatMap(x => [box([.48, .14, .55], [x, .07, 0]), box([.15, 2.35, .16], [x, 1.315, 0])]),
+    ...[1.1, 1.65].map(y => box([2.8, .43, .1], [0, y + .085, 0])), box([1.5, .25, .06], [0, 2.13, -.04]), box([3.52, .68, .84], [0, 2.7, 0])
+  ]);
+  // 木亭配套靠铺地东缘, 正面朝环路; 两件设施分开, 不挤占亭内长凳与进出口.
+  place('park-drinking-fountain', 'drinkingFountain', [32.45, parkY, 102.8], {}, [box([.55, .9, .5], [0, .45, 0])], [0, -Math.PI / 2, 0]);
+  place('park-recycling-bin', 'recyclingBin', [32.4, parkY, 95.1], {}, [box([.74, 1.06, .6], [0, .53, 0])], [0, -Math.PI / 2, 0]);
+  // 前三组点缀枯山水, 后六组补外围树下层次; 土床与小景石复用现有单文件模型.
+  for (const [i, [x, z, w, d, h]] of [[-20.5, 102.65, 1.5, .7, .55], [-12, 102.65, 1.8, .7, .45], [-10.7, 93.25, 1.3, .7, .4], [-43, 96, 3.5, 2.2, .7], [-43, 114, 3.5, 2.2, .55], [-43, 133, 3.5, 2.2, .65], [-32, 149.2, 4, 1.5, .55], [0, 149.2, 4, 1.5, .5], [32, 149.2, 4, 1.5, .6]].entries()) {
+    const rocks = i < 3 ? [] : [[w * .32, d * .18, .25]];
+    place('park-underplant-bed-' + i, 'stoneFlowerbed', [x, parkY, z], { width: w, depth: d, height: .14, rocks }, [box([w, .14, d], [0, .07, 0]), ...rocks.map(([rx, rz, r]) => box([r * 2, r * .65, r * 1.6], [rx, .06 + r * .325, rz]))]);
+    place('park-underplant-' + i, 'lowHedge', [x - (i < 3 ? 0 : .35), parkY + .04, z], { width: i < 3 ? w - .25 : w - 1.2, depth: d - .25, height: h, seed: 381 + i });
+  }
+  // 树木只占用种植地块和前庭侧缘, 统一树池, 草地下仍为平整可走的原地面.
+  const parkTrees = [[-39, 88], [-26, 87], [-39, 103], [-39, 122], [-39, 142], [-24, 146], [18, 148.7], [39, 142], [-19, 125], [40, 86], [27, 86], [13, 86], [39, 105], [-8, 93], [8, 93], [-8, 120], [-14, 86], [-24, 100], [10, 104]];
+  parkTrees.forEach(([x, z], i) => {
+    const scale = i > 16 ? 1.22 : i < 13 ? 1.45 : 1.15;
+    place('park-tree-bed-' + i, 'treePlanter', [x, parkY, z], {}, [box([2.6, .79, 2.6], [0, .395, 0])]);
+    place('park-tree-' + i, i > 16 ? 'sakuraTree' : 'zelkovaTree', [x, parkY + .08, z], { seed: 511 + i * 17 }, [box([.7, 5.3, .7], [0, 2.57, 0])], [0, i * .7, 0], [scale, scale, scale]);
+  });
+  for (const [i, [x, z, yaw]] of [[-25.7, 97, Math.PI / 2], [7, 136, Math.PI / 2], [-17.5, 138, -Math.PI / 2], [25, 148.5, Math.PI]].entries()) {
+    place('park-bench-pad-' + i, 'pocketPaving', [x, height, z], { width: 3.2, depth: 2.3, stone: true }, [box([3.2, .078, 2.3], [0, .039, 0])]);
+    place('park-bench-' + i, 'parkBench', [x, height + .078, z], {}, [box([2, .96, .66], [0, .48, -.035])], [0, yaw, 0]);
+  }
+  // 花叶与灌木允许穿过, 花坛/景石/树干保留实体碰撞; 后侧绿篱只遮景, 地图边界由外围墙负责.
+  for (const [i, [x, z, w]] of [[-26, 151, 38], [26, 151, 38], [-41, 79.3, 12], [41, 79.3, 12]].entries()) {
+    place('park-boundary-bed-' + i, 'stoneFlowerbed', [x, parkY, z], { width: w + .5, depth: 2, height: .16 }, [box([w + .5, .16, 2], [0, .08, 0])]);
+    place('park-boundary-hedge-' + i, 'lowHedge', [x, parkY + .06, z], { width: w, depth: 1.5, height: 1.45, seed: 641 + i });
+  }
   const terrace = [box([width, height, depth], [0, height / 2, start + depth / 2])];
   for (let i = 0; i < steps; i++) {
     const h = height * (i + 1) / steps, z = start - (steps - i - .5) * tread;
@@ -94,8 +255,10 @@
   // 光束从格栅空隙向阳光方向的反向延伸, 在地面前淡出并避开后排座椅.
   for (const [i, x] of [34.42, 35.44].entries()) place('pergola-sunshaft-' + i, 'sunlightShaft', [x, 3.24, 14.8], { sun, drop: 2.98 });
   for (const [i, x] of [34.5, 37.5].entries()) place('pergola-bench-' + i, 'parkBench', [x, .06, 17.1], {}, [box([2, .96, .66], [0, .48, -.035])], [0, Math.PI, 0]);
-  for (const [i, [x, z, length, yaw]] of [[34, 19.2, 4, 0], [43.5, 19.2, 4, 0], [46, 16, 6, Math.PI / 2]].entries()) {
-    place('garden-hedge-' + i, 'lowHedge', [x, 0, z], { width: length }, [box([length, .9, .7], [0, .45, 0])], [0, yaw, 0]);
+  // 转角两条土床留 .1 米缝, 避免石沿交叠产生闪烁.
+  for (const [i, [x, z, length, yaw]] of [[34, 19.2, 4, 0], [43.5, 19.2, 4, 0], [46, 15.65, 5.4, Math.PI / 2]].entries()) {
+    place('garden-hedge-bed-' + i, 'stoneFlowerbed', [x, 0, z], { width: length + .4, depth: 1.1, height: .2 }, [box([length + .4, .2, 1.1], [0, .1, 0])], [0, yaw, 0]);
+    place('garden-hedge-' + i, 'lowHedge', [x, .1, z], { width: length }, [], [0, yaw, 0]);
   }
   place('garden-drinking-fountain', 'drinkingFountain', [31.8, .06, 13.3], {}, [box([.55, .065, .5], [0, .0325, 0]), box([.3, .66, .27], [0, .395, -.035]), box([.5, .22, .45], [0, .79, 0])], [0, Math.PI, 0]);
   place('garden-recycling-bin', 'recyclingBin', [40.8, .06, 13.3], {}, [box([.72, 1.06, .56], [0, .53, -.005])], [0, Math.PI, 0]);
@@ -253,6 +416,12 @@
       lowHedge: 'models/low-hedge.js', drinkingFountain: 'models/drinking-fountain.js',
       coastalBeach: 'models/coastal-beach.js', stationNeighborhood: 'models/station-neighborhood.js',
       districtGround: 'models/district-ground.js',
+      lakeFence: 'models/lake-fence.js', pondLotus: 'models/pond-lotus.js', waterSplash: 'models/water-splash.js',
+      waterIris: 'models/water-iris.js',
+      parkBridge: 'models/park-bridge.js', parkPond: 'models/park-pond.js', parkFlowerbed: 'models/park-flowerbed.js', emaRack: 'models/ema-rack.js',
+      dryGarden: 'models/dry-garden.js', landscapeRocks: 'models/landscape-rocks.js',
+      shrineParkGround: 'models/shrine-park-ground.js', shrineTorii: 'models/shrine-torii.js', parkShrine: 'models/park-shrine.js',
+      temizuya: 'models/temizuya.js', parkPavilion: 'models/park-pavilion.js', stoneLantern: 'models/stone-lantern.js', parkSign: 'models/park-sign.js',
       lawn: 'models/lawn.js',
       sunlightShaft: 'models/sunlight-shaft.js',
       sunRays: 'models/sun-rays.js',
@@ -278,7 +447,8 @@
     atmosphere: { sky: 0xa6cbdc, fogNear: 180, fogFar: 2500, exposure: .94, cameraFar: 8000, fov: 64, pixelRatio: 1.5 },
     lights: [
       { type: 'hemisphere', sky: 0xc8e5f4, ground: 0x8c8065, intensity: 1.65, position: [0, 25, 0] },
-      { type: 'sun', color: 0xffedce, intensity: 3.5, position: sun, target: [0, 0, 0], shadow: true, shadowExtent: 52, shadowFar: 160, shadowBias: -.0012, staticShadow: true }
+      // 同一太阳向量保持光照方向, 扩大静态阴影覆盖车站和公园, 不增加贴图分辨率或光源.
+      { type: 'sun', color: 0xffedce, intensity: 3.5, position: [-96, 146.4, 7], target: [0, 2.4, 70], shadow: true, shadowExtent: 105, shadowFar: 320, shadowBias: -.00055, staticShadow: true }
     ],
     instances
   };
