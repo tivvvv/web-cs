@@ -1,0 +1,129 @@
+// 公园乔木: 连续分枝, 树皮纹理与细叶冠层, 不用实体球团填充树冠; 静态资源只在本模型内共享.
+FPS.models.parkTree = (() => {
+  let leafGeometry, barkMaterial, foliageMaterial;
+  return (T, o = {}) => {
+    const root = new T.Group(), branches = [], crowns = [], pose = new T.Object3D(), up = new T.Vector3(0, 1, 0);
+    let seed = o.seed ?? 71; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
+    if (!leafGeometry) {
+      leafGeometry = new T.PlaneGeometry(.54,1,1,2).rotateX(-Math.PI/2);
+      const lp=leafGeometry.attributes.position, colors=[];
+      for(let i=0;i<lp.count;i++) { lp.setY(i,.035*(1.-Math.abs(lp.getZ(i))*2)); colors.push(.93,.98,.88); }
+      leafGeometry.setAttribute('color',new T.Float32BufferAttribute(colors,3)); leafGeometry.computeVertexNormals();
+      foliageMaterial = new T.MeshStandardMaterial({ vertexColors: true, alphaTest: .42, alphaToCoverage: true, roughness: .9, side: T.DoubleSide });
+      const wind = { value: 0 }, coverage = { value: 1 };
+      foliageMaterial.customProgramCacheKey = () => 'park-tree-foliage-v3';
+      foliageMaterial.onBeforeCompile = shader => {
+        shader.uniforms.leafTime = wind; shader.uniforms.leafCoverage = coverage;
+        shader.vertexShader = 'uniform float leafTime; varying vec3 canopyNormal;\n' + shader.vertexShader.replace('#include <begin_vertex>', `
+          #include <begin_vertex>
+          #ifdef USE_INSTANCING
+            canopyNormal=normalize(normalMatrix*(instanceMatrix[3].xyz-vec3(0.,3.25,0.)));
+            float phase=dot(instanceMatrix[3].xyz,vec3(.73,.19,.51));
+            transformed.z+=sin(leafTime*1.7+phase)*.055*length(position.xz);
+            transformed.x+=sin(leafTime*.8+phase*1.3)*.018;
+          #endif
+        `);
+        // 覆盖率在原裁切阈值两侧平滑, 不用单侧渐变缩小叶片; 普通目标保留硬裁切回退.
+        shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `#ifdef USE_ALPHATEST
+      #ifdef ALPHA_TO_COVERAGE
+        if(leafCoverage>.5) {
+          float width=max(fwidth(diffuseColor.a),.001);
+          diffuseColor.a=smoothstep(alphaTest-.5*width,alphaTest+.5*width,diffuseColor.a);
+          if(diffuseColor.a==0.) discard;
+        } else {
+          if(diffuseColor.a<alphaTest) discard;
+          diffuseColor.a=1.;
+        }
+      #else
+        if(diffuseColor.a<alphaTest) discard;
+      #endif
+    #endif`);
+        shader.fragmentShader = 'uniform float leafCoverage; varying vec3 canopyNormal;\n'+shader.fragmentShader.replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
+          float leafFootprint=max(length(dFdx(vMapUv)),length(dFdy(vMapUv)));
+          normal=normalize(mix(normal,normalize(canopyNormal),mix(.65,.95,smoothstep(.1,.4,leafFootprint))));`).replace('#include <lights_fragment_begin>', `
+          #include <lights_fragment_begin>
+          #if NUM_DIR_LIGHTS > 0
+            float transmission=pow(max(dot(geometryViewDir,-directionalLights[0].direction),0.),3.);
+            reflectedLight.directDiffuse+=diffuseColor.rgb*directLight.color*(.055+.30*transmission);
+          #endif
+        `);
+      };
+      foliageMaterial.userData.wind = wind; foliageMaterial.userData.coverage = coverage;
+
+      const leafCanvas = document.createElement('canvas'); leafCanvas.width=64; leafCanvas.height=128;
+      const leafCtx=leafCanvas.getContext('2d'), leafGradient=leafCtx.createLinearGradient(0,0,64,0);
+      leafGradient.addColorStop(0,'#a6b89a'); leafGradient.addColorStop(.48,'#ebefdd'); leafGradient.addColorStop(1,'#bbc9a6');
+      leafCtx.save();leafCtx.beginPath();leafCtx.moveTo(32,0);leafCtx.bezierCurveTo(57,28,69,78,32,128);leafCtx.bezierCurveTo(-5,78,7,28,32,0);leafCtx.clip();
+      leafCtx.fillStyle=leafGradient; leafCtx.fillRect(0,0,64,128);
+      leafCtx.strokeStyle='#899d77'; leafCtx.lineWidth=.8;
+      leafCtx.beginPath(); leafCtx.moveTo(32,0); leafCtx.lineTo(32,128); leafCtx.stroke();
+      for(let y=20;y<118;y+=14) for(const side of [-1,1]) {
+        leafCtx.beginPath(); leafCtx.moveTo(32,y); leafCtx.quadraticCurveTo(32+side*13,y-5,32+side*29,y-16); leafCtx.stroke();
+      }
+      leafCtx.restore();
+      foliageMaterial.map = leafTexture(leafCanvas);
+      const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 512;
+      const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(256, 512);
+      for (let y = 0; y < 512; y++) for (let x = 0; x < 256; x++) {
+        const fiber = Math.sin(x * .24 + Math.sin(y * .025) * .9) * Math.sin(x * .071 + Math.sin(y * .014) * 2.4);
+        const v = 154 + fiber * 27 + (random() - .5) * 15, i = (y * 256 + x) * 4;
+        pixels.data.set([v, v - 8, v - 21, 255], i);
+      }
+      ctx.putImageData(pixels, 0, 0); const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
+      map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4;
+      barkMaterial = new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .012, roughness: 1, color: 0xb5a593 });
+    }
+    function leafTexture(canvas) {
+      // 只向透明区延伸 RGB, 保留原始 alpha; 缩小采样时不会混入黑底形成跳动的暗边.
+      const w=canvas.width, h=canvas.height, data=canvas.getContext('2d').getImageData(0,0,w,h).data;
+      const queue=new Int32Array(w*h), visited=new Uint8Array(w*h); let head=0, tail=0;
+      for(let i=0;i<w*h;i++) if(data[i*4+3]>240) { visited[i]=1; queue[tail++]=i; }
+      while(head<tail) {
+        const i=queue[head++], x=i%w, y=Math.floor(i/w);
+        for(const j of [x?i-1:-1,x+1<w?i+1:-1,y?i-w:-1,y+1<h?i+w:-1]) {
+          if(j<0||visited[j]) continue; visited[j]=1; queue[tail++]=j;
+          for(let c=0;c<3;c++) data[j*4+c]=data[i*4+c];
+        }
+      }
+      const pixels=new Uint8Array(data.length);
+      for(let y=0;y<h;y++) pixels.set(data.subarray(y*w*4,(y+1)*w*4),(h-1-y)*w*4);
+      const map=new T.DataTexture(pixels,w,h); map.colorSpace=T.SRGBColorSpace; map.anisotropy=4;
+      map.generateMipmaps=true; map.minFilter=T.LinearMipmapLinearFilter; map.magFilter=T.LinearFilter; map.needsUpdate=true; return map;
+    }
+    function branch(a, b, radius, taper = .42) {
+      const delta = b.clone().sub(a); pose.position.copy(a).addScaledVector(delta, .5);
+      pose.quaternion.setFromUnitVectors(up, delta.clone().normalize()); pose.scale.set(1, 1, 1); pose.updateMatrix();
+      branches.push(new T.CylinderGeometry(radius * taper, radius, delta.length() + .035, 9, 2, true).applyMatrix4(pose.matrix));
+    }
+    const maple = o.kind === 'maple', bend = (random() - .5) * .65, growth = .85 + random() * .3;
+    const foot = new T.Vector3(0, -.09, 0), fork = new T.Vector3(bend, 1.75 * growth, .08), stem = new T.Vector3(bend - .12, 3.05 * growth, -.05);
+    branch(foot, fork, .22, .72); branch(fork, stem, .16, .55);
+    for (let i = 0; i < 5; i++) {
+      const a = i * Math.PI * .4, start = new T.Vector3(Math.sin(a) * .36, -.045, Math.cos(a) * .36);
+      branch(start, new T.Vector3(bend * .1, .52, 0), .085, .4);
+    }
+    for (let i = 0; i < 9; i++) {
+      const a = i * 2.4 + random() * .35, reach = (maple ? 1.8 : 1.35) + random() * 1.35;
+      const junction = new T.Vector3(Math.sin(a) * reach * .58 + bend, (2.9 + random() * 1.4) * growth, Math.cos(a) * reach * .58);
+      branch(new T.Vector3(bend, (1.95 + i * .11) * growth, 0), junction, .067 + random() * .012);
+      for (let j = 0; j < 3; j++) {
+        const angle = a + (j - 1) * .7, tip = new T.Vector3(Math.sin(angle) * reach, junction.y + (maple ? .15 : .35) + random() * .75, Math.cos(angle) * reach);
+        branch(junction, tip, .031, .25); crowns.push({ tip, radius: .54 + random() * .55 });
+      }
+    }
+    crowns.push({ tip: new T.Vector3(bend, (maple ? 4.6 : 5.1) * growth, 0), radius: .95 });
+    const wood = new T.Mesh(T.mergeGeometries(branches), barkMaterial); wood.castShadow = wood.receiveShadow = true; root.add(wood); branches.forEach(g => g.dispose());
+    const count = maple ? 6400 : 8400, leaves = new T.InstancedMesh(leafGeometry, foliageMaterial, count), tint = new T.Color();
+    for (let i = 0; i < count; i++) {
+      const { tip, radius } = crowns[i % crowns.length], a = random() * Math.PI * 2, y = random() * 2 - 1, r = Math.sqrt(1 - y * y) * Math.cbrt(random());
+      pose.position.set(tip.x + Math.cos(a) * r * radius, tip.y + y * radius * .73, tip.z + Math.sin(a) * r * radius);
+      pose.rotation.set((random() - .5) * 1.8, a, (random() - .5) * 1.4);
+      const size = .17 + random() * .1; pose.scale.set(size * (maple ? 1.15 : .9), size, size); pose.updateMatrix(); leaves.setMatrixAt(i, pose.matrix);
+      tint.set((maple ? [0x647541, 0x839052, 0x586a38, 0x8b9259] : [0x58713c, 0x708447, 0x4d6636, 0x869654])[i % 4]);
+      tint.multiplyScalar(.8 + .2 * Math.min(1, (pose.position.y - 3) / 2.8)); leaves.setColorAt(i, tint);
+    }
+    // 线性 MSAA 世界缓冲使用覆盖率; 原生画布与单采样倒影保留硬裁切, 避免编码后混合造成额外跳色.
+    leaves.onBeforeRender = renderer => { foliageMaterial.userData.coverage.value = renderer.getRenderTarget()?.samples > 1 ? 1 : 0; };
+    leaves.castShadow = leaves.receiveShadow = true; leaves.raycast = () => {}; root.add(leaves); let time = 0; return { root, update(dt) { foliageMaterial.userData.wind.value = (time += dt); } };
+  };
+})();

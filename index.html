@@ -229,7 +229,7 @@ body[data-freeplay="true"] .mission,body[data-freeplay="true"] .radar{display:no
 </details>
 <script>
 'use strict';
-// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, beforeRender?, render?, dispose?, onHit?, damage?, alive?, muzzle?, debugMeshes?, bodyWire?}.
+// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, beforeRender?, prepare?, render?, dispose?, onHit?, damage?, alive?, muzzle?, debugMeshes?, bodyWire?}.
 // 隔离可选模块的回调异常. 主程序统一维护唯一主循环和通用游戏规则.
 window.FPS = { models: Object.create(null) };
 const $ = id => document.getElementById(id), failures = new Set();
@@ -542,7 +542,7 @@ function createInstance(data) {
   }
   if (data.attach && data.attach !== 'camera') throw Error('未知挂载目标');
   const instance = factory(T, data.options || {}); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
-  for (const callback of ['update', 'beforeRender', 'render', 'dispose', 'onHit', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
+  for (const callback of ['update', 'beforeRender', 'prepare', 'render', 'dispose', 'onHit', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
   if (instance.muzzle !== undefined && !instance.muzzle?.isObject3D) throw Error('枪口必须为 Object3D');
   if (body && typeof instance.damage !== 'function') throw Error('动态身体需要角色伤害接口');
   if (instance.bodyWire !== undefined && !instance.bodyWire?.isObject3D) throw Error('身体线框必须为 Object3D');
@@ -760,6 +760,36 @@ function frame(stamp) {
     finally { scene.background = background; camera.layers.set(0); renderer.autoClear = true; renderer.shadowMap.autoUpdate = true; }
   }
 }
+// 入场前编译全部材质并上传离屏资源, 转身时不再首次创建纹理和顶点缓冲.
+async function prepareScene() {
+  const target = renderer.getRenderTarget(), mask = camera.layers.mask, flags = [];
+  const buffer = new T.WebGLRenderTarget(32, 32, { type: renderer.extensions.has('EXT_color_buffer_float') ? T.HalfFloatType : undefined });
+  try {
+    renderWorld();
+    for (const e of entries) if (e.prepare && !e.disabled) {
+      try { await e.prepare(renderer, scene, camera); }
+      catch (error) { e.disabled = true; report(e.id + ' 准备', error); guarded(e.id + ' 清理', () => e.dispose?.()); }
+    }
+    scene.traverse(n => { if (n.isMesh || n.isLine) { flags.push([n, n.frustumCulled]); n.frustumCulled = false; } });
+    renderer.setRenderTarget(buffer); await renderer.compileAsync(scene, camera); renderer.render(scene, camera);
+    renderer.setRenderTarget(target); camera.layers.set(1); await renderer.compileAsync(scene, camera);
+    // 等待上传和编译的 GPU 队列完成, 不把延迟带进第一个游戏视角.
+    const gl = renderer.getContext(), fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
+    if (fence) await new Promise((resolve, reject) => {
+      const deadline = performance.now() + 5000;
+      const check = () => {
+        const status = gl.clientWaitSync(fence, 0, 0);
+        if (status === gl.TIMEOUT_EXPIRED && !gl.isContextLost() && performance.now() < deadline) { setTimeout(check, 16); return; }
+        gl.deleteSync(fence);
+        if (status === gl.WAIT_FAILED || status === gl.TIMEOUT_EXPIRED) reject(Error('GPU 资源准备未完成, 请重新加载'));
+        else resolve();
+      }; check();
+    });
+  } finally {
+    for (const [n, value] of flags) n.frustumCulled = value;
+    camera.layers.mask = mask; renderer.setRenderTarget(target); buffer.dispose();
+  }
+}
 async function boot() {
   // 场景入口只在初始化时选择, 主循环继续使用统一模型回调.
   const layoutPath = new URLSearchParams(location.search).get('scene') === 'industrial' ? 'scene-layout.js' : 'scene-kamakura.js';
@@ -826,6 +856,8 @@ async function boot() {
     document.querySelector('.controls span:nth-child(3)').innerHTML = '<kbd>SPACE</kbd>跳跃';
     document.querySelector('.hud-help').textContent = 'WASD 漫步  SPACE 跳跃  SHIFT 奔跑  B 自由飞行  U 敌人开关  ESC 暂停';
   }
+  $('start-label').textContent = '正在准备画面';
+  try { await prepareScene(); } catch (error) { report('渲染准备', error); }
   if (!failures.size) $('system-status').textContent = 'SYSTEM ONLINE / 本地就绪';
   $('start-label').textContent = total ? '进入训练场' : '进入场景'; $('start').disabled = false; ready = true;
   window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });

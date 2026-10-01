@@ -6,7 +6,7 @@ FPS.models.kamakuraStation = (T, options = {}) => {
   const concrete = mat(0xb8baaf, .94), asphalt = mat(0x60696b, .98), fascia = mat(0xd5d2bf), iron = mat(0x53675d, .48, .55);
   const roof = mat(0x596a64, .65, .4), yellow = mat(0xdbb74b);
   const wood = mat(0x9d7550), white = mat(0xeee9db);
-  // 一张小纹理共用于沥青与混凝土, 靠底色和颗粒尺度区分, 不增加凹凸采样.
+  // 一张小纹理共用于沥青与混凝土, 靠底色, 颗粒尺度与微凹凸区分.
   const grain = document.createElement('canvas'); grain.width = grain.height = 128;
   const ctx = grain.getContext('2d'), pixels = ctx.createImageData(128, 128); let seed = 308;
   for (let i = 0; i < pixels.data.length; i += 4) {
@@ -17,13 +17,27 @@ FPS.models.kamakuraStation = (T, options = {}) => {
   ctx.putImageData(pixels, 0, 0);
   const aggregate = new T.CanvasTexture(grain); aggregate.colorSpace = T.SRGBColorSpace;
   aggregate.wrapS = aggregate.wrapT = T.RepeatWrapping; aggregate.anisotropy = 4;
-  asphalt.map = concrete.map = aggregate;
+  asphalt.map = concrete.map = fascia.map = aggregate;
+  for(const m of [asphalt,concrete,fascia]) { m.bumpMap=aggregate; m.bumpScale=m===asphalt?.009:.004; }
+  // 候车椅纵向木纤维, 年轮与结疤; 金属保留细微表面粗糙度.
+  const timber=document.createElement('canvas'); timber.width=256; timber.height=128;
+  const tc=timber.getContext('2d'), tp=tc.createImageData(256,128);
+  for(let y=0;y<128;y++) for(let x=0;x<256;x++) {
+    const fiber=y+3*Math.sin(x*.022)+2*Math.sin(x*.057+y*.035);
+    const knot=Math.sin(Math.hypot((x-88)*.3,y-67)*1.4)*Math.exp(-((x-88)**2/1900+(y-67)**2/280));
+    const v=215+13*Math.sin(fiber*1.4)+8*Math.sin(fiber*.41)+knot*22; tp.data.set([v,v-7,v-16,255],(y*256+x)*4);
+  }
+  tc.putImageData(tp,0,0); const woodMap=new T.CanvasTexture(timber); woodMap.colorSpace=T.SRGBColorSpace;
+  woodMap.wrapS=woodMap.wrapT=T.RepeatWrapping; woodMap.anisotropy=8;
+  wood.map=wood.bumpMap=woodMap; wood.bumpScale=.004;
+  iron.roughnessMap=roof.roughnessMap=aggregate;
+  roof.bumpMap=aggregate; roof.bumpScale=.002;
   function add(source, p, m, r = [0, 0, 0]) {
     const g = source.index ? source.toNonIndexed() : source; if (g !== source) source.dispose();
     const mesh = new T.Mesh(g, m); mesh.position.set(...p); mesh.rotation.set(...r); mesh.updateMatrix();
     g.applyMatrix4(mesh.matrix);
     if (m.map) {
-      const a = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv, repeat = m === asphalt ? 3 : 5;
+      const a = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv, repeat = m === wood ? 1.2 : m === asphalt ? 3 : 5;
       for (let i = 0; i < a.count; i++) uv.setXY(i, (Math.abs(n.getX(i)) > .5 ? a.getZ(i) : a.getX(i)) * repeat, (Math.abs(n.getY(i)) > .5 ? a.getZ(i) : a.getY(i)) * repeat);
     }
     if (!batches.has(m)) batches.set(m, []); batches.get(m).push(g);

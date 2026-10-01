@@ -10,8 +10,11 @@ FPS.models.parkFlowerbed = (T, o = {}) => {
     for (let j = 0; j < g.attributes.position.count; j++) colors.push(c.r, c.g, c.b);
     g.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
   }
-  const bed = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
-  bed.receiveShadow = true; root.add(bed); parts.forEach(g => g.dispose());
+  if (!o.natural) {
+    const bed = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+    bed.receiveShadow = true; root.add(bed);
+  }
+  parts.forEach(g => g.dispose());
   const points = [];
   for (let i = 0; i < 7; i++) {
     const angle = i * 2.4, length = .6 + i % 3 * .15, spread = grass ? .3 : .44;
@@ -50,12 +53,12 @@ FPS.models.parkFlowerbed = (T, o = {}) => {
   for (let i = 0; i < count; i++) {
     const angle = random() * Math.PI * 2, radius = Math.sqrt((i + .5) / count) * .86,
       x = Math.cos(angle) * radius * (w / 2 - .25), z = Math.sin(angle) * radius * (d / 2 - .2), height = h * (.8 + random() * .35);
-    pose.position.set(x, .065, z); pose.rotation.set(0, angle, 0); pose.scale.set(.85, height, .85);
+    pose.position.set(x, o.natural ? .008 : .065, z); pose.rotation.set(0, angle, 0); pose.scale.set(.85, height, .85);
     pose.updateMatrix(); foliage.setMatrixAt(i, pose.matrix);
     color.setHSL(grass ? .2 : .26, .25 + random() * .15, .27 + random() * .09); foliage.setColorAt(i, color);
     if (blooms) for (let j = 0; j < 3; j++) {
       const a = j * Math.PI * 2 / 3 - angle;
-      pose.position.set(x + Math.cos(a) * .102, .065 + height * (.48 + j * .07), z + Math.sin(a) * .102);
+      pose.position.set(x + Math.cos(a) * .102, (o.natural ? .008 : .065) + height * (.48 + j * .07), z + Math.sin(a) * .102);
       pose.rotation.set(.18 * Math.sin(a), a, .18 * Math.cos(a)); pose.scale.setScalar(.85 + random() * .35);
       pose.updateMatrix(); blooms.setMatrixAt(i * 3 + j, pose.matrix);
       color.set(o.kind === 'blue' ? [0x8c8dcc, 0xa0a0d7, 0x797ec0][i % 3] : 0xfff8e6); blooms.setColorAt(i * 3 + j, color);

@@ -97,5 +97,29 @@ FPS.models.coastalSky = (T, options = {}) => {
   const dome = new T.Mesh(new T.SphereGeometry(4800, 32, 20), material);
   // 不透明物体先写入深度, 天空只对未被遮挡的像素计算体积云.
   dome.renderOrder = 100; dome.frustumCulled = false; root.add(dome);
-  return { root, update(dt) { material.uniforms.uTime.value += dt; } };
+  // 天空和地面色带生成环境贴图, 给电车漆面, 玻璃和金属提供统一反光; 无网络资源.
+  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const ctx=canvas.getContext('2d');
+  const gradient=ctx.createLinearGradient(0,0,0,256);
+  for(const [t,color] of [[0,'#417bb0'],[.32,'#86b6cf'],[.48,'#c4d7db'],[.52,'#bbbca3'],[.68,'#7c8063'],[1,'#5e604d']]) gradient.addColorStop(t,color);
+  ctx.fillStyle=gradient;ctx.fillRect(0,0,512,256);
+  const direction=material.uniforms.uSun.value, sx=(.5+Math.atan2(direction.z,direction.x)/(Math.PI*2))*512, sy=(.5-Math.asin(direction.y)/Math.PI)*256;
+  for(const offset of [-512,0,512]) {
+    const halo=ctx.createRadialGradient(sx+offset,sy,1,sx+offset,sy,28);
+    halo.addColorStop(0,'rgba(255,242,205,1)');halo.addColorStop(.14,'rgba(255,233,188,.8)');halo.addColorStop(1,'rgba(255,233,188,0)');
+    ctx.fillStyle=halo;ctx.fillRect(0,0,512,128);
+  }
+  const environment=new T.CanvasTexture(canvas);environment.colorSpace=T.SRGBColorSpace;environment.mapping=T.EquirectangularReflectionMapping;
+  let owner, previous, previousIntensity;
+  return {
+    root, update(dt) { material.uniforms.uTime.value += dt; },
+    beforeRender(renderer, scene) {
+      if(owner || !root.visible) return;
+      owner=scene;previous=scene.environment;previousIntensity=scene.environmentIntensity;
+      scene.environment=environment;scene.environmentIntensity=.48;
+    },
+    dispose() {
+      if(owner?.environment===environment){owner.environment=previous;owner.environmentIntensity=previousIntensity;}
+      environment.dispose();
+    }
+  };
 };

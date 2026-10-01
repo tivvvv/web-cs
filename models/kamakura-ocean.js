@@ -3,7 +3,7 @@ FPS.models.kamakuraOcean = (T, o = {}) => {
   const root = new T.Group();
   const material = new T.ShaderMaterial({
     uniforms: {
-      uTime: { value: 0 }, uSun: { value: new T.Vector3(-.48, .72, -.32).normalize() },
+      uTime: { value: 0 }, uSun: { value: new T.Vector3(...(o.sun ?? [-32, 48, -21])).normalize() },
       uBeach: { value: new T.Vector3(o.sandStart ?? -18, o.sandLevel ?? -1.05, o.slope ?? .04) },
       uEdge: { value: new T.Vector3(o.halfWidth ?? 80, o.edgeSlope ?? .045, 150) }
     },

@@ -31,7 +31,7 @@ function material(T, kind) {
   const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
   map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4;
   const mat = new T.MeshStandardMaterial({ map, vertexColors: true, roughness: kind === 'stone' ? .83 : .97,
-    ...(kind === 'concrete' ? {} : { bumpMap: map, bumpScale: kind === 'gravel' ? .018 : .004 }) });
+    bumpMap: map, bumpScale: kind === 'gravel' ? .018 : kind === 'concrete' ? .003 : .004 });
   materials.set(kind, mat); return mat;
 }
 FPS.models.pocketPaving = (T, o = {}) => {

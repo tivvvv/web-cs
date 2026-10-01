@@ -1,20 +1,20 @@
-// 公园湖水, 岸线由场景共享给挖地与碰撞; 单次绘制水面, 复用太阳阴影, 无反射相机或屏幕采样; 半透明, 俯视可见水下鱼体.
+// 公园湖水, 岸线由场景共享给挖地与碰撞; 近岸低分辨率平面倒影, 复用太阳阴影; 半透明, 俯视可见水下鱼体.
 FPS.models.parkPond = (T, o = {}) => {
   const root = new T.Group(), { width: w, depth: d, shore, bottom: floor, waterLevel: waterY, rim: bankY } = o;
   const bank = new T.Shape(); bank.moveTo(-w / 2, -d / 2); bank.lineTo(w / 2, -d / 2); bank.lineTo(w / 2, d / 2); bank.lineTo(-w / 2, d / 2); bank.closePath();
   const hole = new T.Shape(); shore.forEach(([x, z], i) => i ? hole.lineTo(x, -z) : hole.moveTo(x, -z)); hole.closePath(); bank.holes.push(hole);
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128; const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(128, 128); let seed = 741;
-  for (let i = 0; i < 128 * 128; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; const v = 180 + (seed / 4294967296 - .5) * 23; pixels.data.set([v, v, v, 255], i * 4); }
+  for (let i = 0; i < 128 * 128; i++) { seed = (seed * 1664525 + 1013904223) >>> 0; const v = 242 + (seed / 4294967296 - .5) * 18; pixels.data.set([v, v, v, 255], i * 4); }
   ctx.putImageData(pixels, 0, 0);
   for (let i = 0; i < 580; i++) {
     seed = (seed * 1664525 + 1013904223) >>> 0; const x = seed % 128, y = seed >>> 16 & 127;
-    ctx.strokeStyle = i % 2 ? '#989898' : '#c3c3c3'; ctx.lineWidth = .4; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.sin(i) * .7, y + 2); ctx.stroke();
+    ctx.strokeStyle = i % 2 ? '#d7dccf' : '#fafbf2'; ctx.lineWidth = .4; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + Math.sin(i) * .7, y + 2); ctx.stroke();
   }
   const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace; map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4;
   const bankGeometry = new T.ExtrudeGeometry(bank, { depth: bankY - floor, bevelEnabled: false, steps: 1 }).rotateX(-Math.PI / 2).translate(0, floor, 0);
   const uv = bankGeometry.attributes.uv, p = bankGeometry.attributes.position;
   for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / 2, p.getZ(i) / 2);
-  const rim = new T.Mesh(bankGeometry, [new T.MeshStandardMaterial({ color: 0x5d7042, map, roughness: 1 }), new T.MeshStandardMaterial({ color: 0x46503c, roughness: 1 })]); rim.castShadow = rim.receiveShadow = true; root.add(rim);
+  const rim = new T.Mesh(bankGeometry, [new T.MeshStandardMaterial({ color: 0x63774a, map, bumpMap: map, bumpScale: .004, roughness: 1 }), new T.MeshStandardMaterial({ color: 0x46503c, roughness: 1 })]); rim.castShadow = rim.receiveShadow = true; root.add(rim);
   // 256² 数据纹理只在创建时计算; R 为离岸距离, G/B 为细颗粒与缓慢色差, 不作为颜色贴图解码.
   const shoreCanvas = document.createElement('canvas'); shoreCanvas.width = shoreCanvas.height = 256;
   const shoreCtx = shoreCanvas.getContext('2d'), shorePixels = shoreCtx.createImageData(256, 256);
@@ -36,16 +36,22 @@ FPS.models.parkPond = (T, o = {}) => {
   const waterGeometry = new T.BufferGeometry(); waterGeometry.setAttribute('position', new T.Float32BufferAttribute(vertices, 3)); waterGeometry.setIndex(indices); waterGeometry.computeVertexNormals();
   const impacts = new Float32Array(6 * 4); for (let i = 0; i < 6; i++) impacts[i * 4 + 2] = -100;
   let impactSlot = 0; const hitLocal = new T.Vector3();
-  const waterUniforms = { lakeHits: { value: impacts }, lakeTime: { value: 0 }, lakeShore: { value: shoreMap }, lakeSize: { value: new T.Vector2(w, d) } };
-  // 复用标准材质的灯光/阴影绑定和顶点阶段, 片元只算湖水, 不执行额外 PBR 光照或反射相机.
+  // 反射辅助面不加入场景, 只借用上游的裁剪平面与相机算法.
+  const mirror = new T.Reflector(new T.PlaneGeometry(1,1), { textureWidth: 768, textureHeight: 512, clipBias: .003, multisample: 2 });
+  mirror.rotation.x=-Math.PI/2; mirror.position.y=waterY; mirror.updateMatrix();
+  const center=new T.Vector3(), toward=new T.Vector3(), frustum=new T.Frustum(), projection=new T.Matrix4(), bounds=new T.Box3();
+  waterGeometry.computeBoundingBox(); let lastReflection=-Infinity;
+  const waterUniforms = { lakeReflection: { value: mirror.getRenderTarget().texture }, lakeReflectionMatrix: mirror.material.uniforms.textureMatrix, lakeReflectionReady: { value: 0 }, lakeHits: { value: impacts }, lakeTime: { value: 0 }, lakeShore: { value: shoreMap }, lakeSize: { value: new T.Vector2(w, d) } };
+  // 复用标准材质的灯光/阴影绑定和顶点阶段, 片元只算湖水, 不执行额外 PBR 光照.
   const material = new T.MeshStandardMaterial({ roughness: .3, transparent: true });
-  material.customProgramCacheKey = () => 'park-lake-water-v2';
+  material.customProgramCacheKey = () => 'park-lake-water-v3';
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, waterUniforms);
-    shader.vertexShader = 'varying vec3 lakeWorld; varying vec2 lakeLocal;\n' + shader.vertexShader.replace(
-      '#include <worldpos_vertex>', '#include <worldpos_vertex>\n lakeWorld=(modelMatrix*vec4(transformed,1.)).xyz; lakeLocal=transformed.xz;'
+    shader.vertexShader = 'uniform mat4 lakeReflectionMatrix; varying vec4 lakeReflectCoord; varying vec3 lakeWorld; varying vec2 lakeLocal;\n' + shader.vertexShader.replace(
+      '#include <worldpos_vertex>', '#include <worldpos_vertex>\n lakeWorld=(modelMatrix*vec4(transformed,1.)).xyz; lakeLocal=transformed.xz; lakeReflectCoord=lakeReflectionMatrix*vec4(transformed.x,-transformed.z,0.,1.);'
     );
     shader.fragmentShader = `
+      uniform sampler2D lakeReflection; uniform float lakeReflectionReady; varying vec4 lakeReflectCoord;
       uniform float lakeTime; uniform vec4 lakeHits[6]; uniform sampler2D lakeShore; uniform vec2 lakeSize;
       varying vec3 lakeWorld; varying vec2 lakeLocal;
       #include <common>
@@ -80,7 +86,7 @@ FPS.models.parkPond = (T, o = {}) => {
         }
         vec3 n=normalize(vec3(-slope.x,1.,-slope.y));
         float fresnel=.025+.9*pow(1.-max(dot(n,view),0.),5.);
-        vec3 water=mix(vec3(.19,.245,.17),vec3(.028,.155,.145),shallows);
+        vec3 water=mix(vec3(.19,.245,.17),vec3(.035,.19,.16),shallows);
         water+=(bed.g-.8)*.045*(1.-shallows)+(bed.b-.5)*.014;
         // 温和的近岸透光纹理, 随风缓移, 不生成海浪白边或第二层透明水面.
         float caustic=pow(.5+.5*sin(dot(p,vec2(2.3,1.6))+lakeTime*.38)*sin(dot(p,vec2(-1.7,2.1))-lakeTime*.29),5.);
@@ -88,6 +94,10 @@ FPS.models.parkPond = (T, o = {}) => {
         water*=mix(.78,1.,smoothstep(.015,.24,bankDistance));
         vec3 reflected=reflect(-view,n);
         vec3 sky=mix(vec3(.46,.63,.69),vec3(.13,.34,.51),smoothstep(0.,.9,reflected.y));
+        vec2 reflectedUV=lakeReflectCoord.xy/lakeReflectCoord.w+slope*.035;
+        float reflectionEdge=smoothstep(0.,.035,min(min(reflectedUV.x,reflectedUV.y),min(1.-reflectedUV.x,1.-reflectedUV.y)));
+        vec3 landscape=texture2D(lakeReflection,clamp(reflectedUV,.001,.999)).rgb;
+        sky=mix(sky,landscape,lakeReflectionReady*reflectionEdge);
         float shadow=getShadowMask();
         vec3 color=mix(water*(.56+.44*shadow),sky*(.78+.22*shadow),fresnel);
         #if NUM_DIR_LIGHTS > 0
@@ -96,7 +106,7 @@ FPS.models.parkPond = (T, o = {}) => {
           color+=vec3(.88,.79,.60)*glint*(.55+.35*detail)*shadow;
         #endif
         color=mix(color,vec3(.56,.73,.73),min(.38,foam*.3)*(.7+.3*shadow));
-        gl_FragColor=vec4(color,.32+.5*fresnel);
+        gl_FragColor=vec4(color,.38+.32*shallows+.24*fresnel);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
         #include <fog_fragment>
@@ -105,6 +115,25 @@ FPS.models.parkPond = (T, o = {}) => {
   const water = new T.Mesh(waterGeometry, material); water.receiveShadow = true; root.add(water);
   return {
     root,
+    prepare(renderer) { if (renderer.extensions.has('EXT_color_buffer_float')) renderer.initRenderTarget(mirror.getRenderTarget()); },
+    beforeRender(renderer, scene, camera) {
+      if (!root.visible || !renderer.extensions.has('EXT_color_buffer_float')) return;
+      root.updateWorldMatrix(true,false); center.setFromMatrixPosition(root.matrixWorld); center.y+=waterY;
+      toward.copy(center).sub(camera.position);
+      if (toward.length()>75 || camera.position.y<=center.y) return;
+      frustum.setFromProjectionMatrix(projection.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
+      bounds.copy(waterGeometry.boundingBox).applyMatrix4(root.matrixWorld);
+      if (!frustum.intersectsBox(bounds)) return;
+      const stamp=performance.now(); if (stamp-lastReflection<1000/30) return;
+      mirror.matrixWorld.multiplyMatrices(root.matrixWorld,mirror.matrix);
+      const target=renderer.getRenderTarget(), xr=renderer.xr.enabled, shadows=renderer.shadowMap.autoUpdate;
+      const visible=water.visible;
+      try {
+        water.visible=false; mirror.onBeforeRender(renderer,scene,camera); waterUniforms.lakeReflectionReady.value=1; lastReflection=stamp;
+      } finally {
+        water.visible=visible; renderer.xr.enabled=xr; renderer.shadowMap.autoUpdate=shadows; renderer.setRenderTarget(target);
+      }
+    },
     onHit(hit, api) {
       if (hit.object !== water) return;
       root.worldToLocal(hitLocal.copy(hit.point));
@@ -114,6 +143,6 @@ FPS.models.parkPond = (T, o = {}) => {
       return { bulletmark: false, impact: false };
     },
     update(dt) { waterUniforms.lakeTime.value += dt; },
-    dispose() { shoreMap.dispose(); map.dispose(); }
+    dispose() { mirror.dispose(); mirror.geometry.dispose(); shoreMap.dispose(); map.dispose(); }
   };
 };

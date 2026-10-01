@@ -3,7 +3,8 @@ FPS.models.lowHedge = (T, o = {}) => {
   const w = o.width ?? 4, d = o.depth ?? .7, h = o.height ?? .9, root = new T.Group();
   let seed = o.seed ?? Math.round(w * 971 + d * 313 + h * 157);
   const rand = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
-  const nx = Math.max(1, Math.ceil(w / .8)), nz = Math.max(1, Math.ceil(d / .8)), nodes = 7;
+  const spacing = o.dense ? .46 : .8;
+  const nx = Math.max(1, Math.ceil(w / spacing)), nz = Math.max(1, Math.ceil(d / spacing)), nodes = o.dense ? 9 : 7;
   const cellX = w / nx, cellZ = d / nz, pose = new T.Object3D(), up = new T.Vector3(0, 1, 0), axis = new T.Vector3();
   // 一片叶子只有六个三角形, 外缘收尖, 中脉轻微隆起; 颜色沿中脉与边缘变化.
   const outline = [[0, .012, .5], [.28, -.018, .16], [.21, -.015, -.25], [0, 0, -.5], [-.21, -.015, -.25], [-.28, -.018, .16]];
@@ -14,7 +15,7 @@ FPS.models.lowHedge = (T, o = {}) => {
   }
   const leaf = new T.BufferGeometry(); leaf.setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
   leaf.setAttribute('color', new T.Float32BufferAttribute(colors, 3)); leaf.computeVertexNormals();
-  const leaves = new T.InstancedMesh(leaf, new T.MeshStandardMaterial({ vertexColors: true, roughness: .79, side: T.DoubleSide }), nx * nz * 4 * (nodes * 2 + 3));
+  const leaves = new T.InstancedMesh(leaf, new T.MeshStandardMaterial({ vertexColors: true, roughness: o.dense ? .9 : .79, side: T.DoubleSide }), nx * nz * 4 * (nodes * 2 + 3));
   const stems = [], tint = new T.Color(), node = new T.Vector3(); let index = 0;
   function branch(a, b, radius) {
     axis.copy(b).sub(a); pose.position.copy(a).addScaledVector(axis, .5);
@@ -22,19 +23,22 @@ FPS.models.lowHedge = (T, o = {}) => {
     stems.push(new T.CylinderGeometry(radius * .42, radius, axis.length(), 5, 1, true).applyMatrix4(pose.matrix));
   }
   function foliage(point, yaw, fresh) {
-    const size = (.15 + rand() * .07) * Math.min(1, h / .65);
+    const size = ((o.dense ? .23 : .15) + rand() * .07) * Math.min(1, h / .65);
     pose.rotation.set(-.5 + rand() * .95, yaw, (rand() - .5) * .65); pose.scale.set(size, size, size);
     axis.set(0, 0, 1).applyQuaternion(pose.quaternion); pose.position.copy(point).addScaledVector(axis, size * .44); pose.updateMatrix();
     leaves.setMatrixAt(index, pose.matrix);
-    tint.setHSL(.255 + rand() * .035, .28 + rand() * .1, .27 + rand() * .055 + fresh * .095); leaves.setColorAt(index++, tint);
+    tint.setHSL(.255 + rand() * .035, (o.dense ? .4 : .28) + rand() * .1, (o.dense ? .235 : .27) + rand() * .055 + fresh * (o.dense ? .035 : .095));
+    if (o.dense) tint.multiplyScalar(.7); leaves.setColorAt(index++, tint);
   }
   for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
     const x = -w / 2 + (ix + .5 + (rand() - .5) * .18) * cellX, z = -d / 2 + (iz + .5 + (rand() - .5) * .22) * cellZ;
+    if (o.natural && (2 * x / w) ** 2 + (2 * z / d) ** 2 > .94 + .08 * Math.sin(x * 3 + z * 2)) continue;
     const base = new T.Vector3(x, .015, z), fork = new T.Vector3(x + (rand() - .5) * .055, h * (.12 + rand() * .06), z);
     branch(base, fork, Math.min(.023, h * .025)); const phase = rand() * Math.PI * 2;
     for (let shoot = 0; shoot < 4; shoot++) {
       const a = phase + shoot * Math.PI / 2 + (rand() - .5) * .4;
-      const tip = new T.Vector3(x + Math.sin(a) * cellX * (.3 + rand() * .12), h * (.72 + rand() * .23), z + Math.cos(a) * cellZ * (.32 + rand() * .1));
+      const shape = o.natural ? .72 + .28 * Math.sqrt(Math.max(0, 1 - (2 * x / w) ** 2 - (2 * z / d) ** 2)) : 1;
+      const tip = new T.Vector3(x + Math.sin(a) * cellX * (.3 + rand() * .12), h * (.72 + rand() * .23) * shape, z + Math.cos(a) * cellZ * (.32 + rand() * .1));
       branch(fork, tip, Math.min(.012, h * .014));
       for (let j = 0; j < nodes; j++) {
         const t = .12 + .88 * j / (nodes - 1); node.copy(fork).lerp(tip, t);
@@ -43,6 +47,7 @@ FPS.models.lowHedge = (T, o = {}) => {
       for (let j = 0; j < 3; j++) foliage(tip, a + j * 2.1, .9);
     }
   }
+  leaves.count = index;
   const branches = new T.Mesh(T.mergeGeometries(stems), new T.MeshStandardMaterial({ color: 0x66644b, roughness: 1 }));
   for (const mesh of [branches, leaves]) { mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); }
   stems.forEach(g => g.dispose()); return { root };

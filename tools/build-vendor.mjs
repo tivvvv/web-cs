@@ -5,15 +5,16 @@ await build({
   stdin: { contents: `export {
     Scene, Group, Object3D, PerspectiveCamera, OrthographicCamera, WebGLRenderer, WebGLRenderTarget, Color, Fog,
     AmbientLight, HemisphereLight, DirectionalLight, PointLight,
-    Vector2, Vector3, Euler, Matrix4, Box3, Box3Helper, Raycaster,
+    Vector2, Vector3, Euler, Matrix4, Box3, Box3Helper, Frustum, Raycaster,
     Mesh, InstancedMesh, Line, LineSegments, BufferGeometry, Float32BufferAttribute,
     BoxGeometry, CylinderGeometry, PlaneGeometry, SphereGeometry, ConeGeometry, RingGeometry,
-    IcosahedronGeometry, TorusGeometry, Shape, ExtrudeGeometry,
+    IcosahedronGeometry, TorusGeometry, Shape, Path, ShapeGeometry, ExtrudeGeometry,
     MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, ShaderMaterial,
-    LineBasicMaterial, CanvasTexture, DepthTexture, HalfFloatType, UnsignedIntType, RepeatWrapping, BackSide,
-    SRGBColorSpace, ACESFilmicToneMapping, PCFSoftShadowMap, DoubleSide, ShaderChunk
+    LineBasicMaterial, CanvasTexture, DataTexture, DepthTexture, HalfFloatType, UnsignedIntType, RepeatWrapping, BackSide, LinearFilter, LinearMipmapLinearFilter,
+    SRGBColorSpace, EquirectangularReflectionMapping, ACESFilmicToneMapping, PCFSoftShadowMap, DoubleSide, ShaderChunk
   } from 'three';
-  export { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';`, resolveDir: process.cwd() },
+  export { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+  export { Reflector } from 'three/addons/objects/Reflector.js';`, resolveDir: process.cwd() },
   bundle: true, minify: true, format: 'iife', globalName: 'THREE',
   outfile: 'vendor/three.min.js', legalComments: 'eof',
 });
