@@ -77,6 +77,24 @@ try {
     } finally { renderer.render = render; }
   });
   assert.equal(reflection.away, 0); assert.equal(reflection.visible, 1); assert.equal(reflection.far, 0); assert(reflection.restored);
+  const stairs = await page.evaluate(() => {
+    const terrace = entries.find(e => e.id === 'station-neighborhood'), { height, start, steps, tread } = terrace.data.options;
+    const ray = new THREE.Raycaster(), heights = [];
+    for (let i = 0; i < steps; i++) {
+      const z = start - (steps - i - .5) * tread;
+      ray.set(new THREE.Vector3(0, height + 1, z), new THREE.Vector3(0, -1, 0));
+      heights.push({ actual: ray.intersectObject(terrace.root, true)[0]?.point.y, expected: height * (i + 1) / steps });
+    }
+    function walk(position, delta, count) {
+      player.debug = false; player.position.set(...position); player.body.vy = 0; player.body.grounded = true;
+      for (let i = 0; i < count; i++) { move(player, ...delta); fall(player.body, 1 / 60); }
+      return player.position.toArray();
+    }
+    return { heights, terrace: walk([0, .078, 14], [0, .05], 180), platform: walk([-5.4, 0, 4.2], [-.05, 0], 80) };
+  });
+  for (const step of stairs.heights) assert(Math.abs(step.actual - step.expected) < .001, '倒角后踏面高度应与台阶碰撞一致');
+  assert(stairs.terrace[2] > 22 && Math.abs(stairs.terrace[1] - 2.4) < .001, `车站入口台阶应能正常登阶: ${JSON.stringify(stairs.terrace)}`);
+  assert(stairs.platform[0] < -9 && Math.abs(stairs.platform[1] - .68) < .001, `月台台阶应能正常登阶: ${JSON.stringify(stairs.platform)}`);
   const preparation = await page.evaluate(async () => {
     const gl = renderer.getContext(), wait = gl.clientWaitSync, mask = camera.layers.mask, target = renderer.getRenderTarget(), flags = [];
     scene.traverse(n => { if (n.isMesh || n.isLine) flags.push([n, n.frustumCulled]); });
@@ -89,5 +107,5 @@ try {
   });
   assert(preparation.rejected && preparation.restored, 'GPU 等待失败后应退出准备并恢复渲染状态');
   assert.deepEqual(result.failures, []); assert.deepEqual(errors, []); assert.deepEqual(network, []);
-  console.log('PASS 6 组全角度转向无新增着色器/纹理/几何上传, 普通渲染回退, 倒影视野剔除与限频/状态恢复, GPU 等待失败恢复, 7 块景石高度/埋根/碰撞包围, 苔岛起伏/砂面挖空/排水带无叠面.');
+  console.log('PASS 6 组全角度转向无新增着色器/纹理/几何上传, 普通渲染回退, 倒影视野剔除与限频/状态恢复, GPU 等待失败恢复, 台阶倒角顶面/入口及月台登阶, 7 块景石高度/埋根/碰撞包围, 苔岛起伏/砂面挖空/排水带无叠面.');
 } finally { await browser.close(); }

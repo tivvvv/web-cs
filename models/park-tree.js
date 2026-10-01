@@ -2,7 +2,7 @@
 FPS.models.parkTree = (() => {
   let leafGeometry, barkMaterial, foliageMaterial;
   return (T, o = {}) => {
-    const root = new T.Group(), branches = [], crowns = [], pose = new T.Object3D(), up = new T.Vector3(0, 1, 0);
+    const root = new T.Group(), branches = [], crowns = [], pose = new T.Object3D();
     let seed = o.seed ?? 71; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
     if (!leafGeometry) {
       leafGeometry = new T.PlaneGeometry(.54,1,1,2).rotateX(-Math.PI/2);
@@ -90,30 +90,50 @@ FPS.models.parkTree = (() => {
       const map=new T.DataTexture(pixels,w,h); map.colorSpace=T.SRGBColorSpace; map.anisotropy=4;
       map.generateMipmaps=true; map.minFilter=T.LinearMipmapLinearFilter; map.magFilter=T.LinearFilter; map.needsUpdate=true; return map;
     }
+    // 沿二次曲线生成连续渐细木枝, 分枝根部与主干相交.
     function branch(a, b, radius, taper = .42) {
-      const delta = b.clone().sub(a); pose.position.copy(a).addScaledVector(delta, .5);
-      pose.quaternion.setFromUnitVectors(up, delta.clone().normalize()); pose.scale.set(1, 1, 1); pose.updateMatrix();
-      branches.push(new T.CylinderGeometry(radius * taper, radius, delta.length() + .035, 9, 2, true).applyMatrix4(pose.matrix));
+      const tipRadius = radius * taper, bend = radius > .12 ? .035 : .08;
+      const start = a.clone(), end = b.clone(), mid = start.clone().lerp(end, .5);
+      mid.x += bend; mid.z -= bend * .6;
+      const positions = [], uv = [], indices = [], rings = radius > .12 ? 9 : 5, sides = radius > .12 ? 12 : 8;
+      const axis = new T.Vector3(0, 1, 0), q = new T.Object3D(), vertex = new T.Vector3();
+      for (let j = 0; j <= rings; j++) {
+        const t = j / rings, point = start.clone().multiplyScalar((1 - t) ** 2).addScaledVector(mid, 2 * t * (1 - t)).addScaledVector(end, t * t);
+        const tangent = mid.clone().sub(start).multiplyScalar(1 - t).addScaledVector(end.clone().sub(mid), t).normalize();
+        q.quaternion.setFromUnitVectors(axis, tangent);
+        for (let k = 0; k <= sides; k++) {
+          const angle = k * Math.PI * 2 / sides, r = (radius * (1 - t ** 1.35) + tipRadius * t ** 1.35) * (1 + .028 * Math.sin(angle * 3 + t * 4));
+          vertex.set(Math.cos(angle) * r, 0, Math.sin(angle) * r).applyQuaternion(q.quaternion).add(point);
+          positions.push(vertex.x, vertex.y, vertex.z); uv.push(k / sides * r * 9, point.y * .72);
+          if (j < rings && k < sides) { const n = j * (sides + 1) + k; indices.push(n, n + sides + 1, n + 1, n + 1, n + sides + 1, n + sides + 2); }
+        }
+      }
+      // 连接处保持开放, 地下根部与末端细枝封口; 所有木枝合批.
+      for (const j of [0, rings]) { if (j ? tipRadius > radius * .4 : start.y > 0) continue; const p = j ? end : start, n = positions.length / 3; positions.push(p.x, p.y, p.z); uv.push(.5, j ? 1 : 0);
+        for (let k = 0; k < sides; k++) { const v = j * (sides + 1) + k; indices.push(...(j ? [n, v + 1, v] : [n, v, v + 1])); }
+      }
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(positions, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2)); g.setIndex(indices); g.computeVertexNormals(); branches.push(g);
     }
-    const maple = o.kind === 'maple', bend = (random() - .5) * .65, growth = .85 + random() * .3;
-    const foot = new T.Vector3(0, -.09, 0), fork = new T.Vector3(bend, 1.75 * growth, .08), stem = new T.Vector3(bend - .12, 3.05 * growth, -.05);
-    branch(foot, fork, .22, .72); branch(fork, stem, .16, .55);
+    const maple = o.kind === 'maple', bend = (random() - .5) * .24, spread = o.spread ?? 1, growth = (.85 + random() * .3) * (o.growth ?? 1);
+    const foot = new T.Vector3(0, -.09, 0), stem = new T.Vector3(bend - .12, 3.05 * growth, -.05);
+    branch(foot, stem, .22, .25);
     for (let i = 0; i < 5; i++) {
       const a = i * Math.PI * .4, start = new T.Vector3(Math.sin(a) * .36, -.045, Math.cos(a) * .36);
       branch(start, new T.Vector3(bend * .1, .52, 0), .085, .4);
     }
     for (let i = 0; i < 9; i++) {
-      const a = i * 2.4 + random() * .35, reach = (maple ? 1.8 : 1.35) + random() * 1.35;
+      const a = i * 2.4 + random() * .35, reach = ((maple ? 1.8 : 1.35) + random() * 1.35) * spread;
       const junction = new T.Vector3(Math.sin(a) * reach * .58 + bend, (2.9 + random() * 1.4) * growth, Math.cos(a) * reach * .58);
-      branch(new T.Vector3(bend, (1.95 + i * .11) * growth, 0), junction, .067 + random() * .012);
+      const attachY = (1.95 + i * .11) * growth, attachX = bend - .12 * (attachY / growth - 1.75) / 1.3;
+      branch(new T.Vector3(attachX, attachY, .08 - .13 * (attachY / growth - 1.75) / 1.3), junction, .067 + random() * .012);
       for (let j = 0; j < 3; j++) {
         const angle = a + (j - 1) * .7, tip = new T.Vector3(Math.sin(angle) * reach, junction.y + (maple ? .15 : .35) + random() * .75, Math.cos(angle) * reach);
-        branch(junction, tip, .031, .25); crowns.push({ tip, radius: .54 + random() * .55 });
+        branch(junction, tip, .031, .25); crowns.push({ tip, radius: (.54 + random() * .55) * Math.sqrt(spread) });
       }
     }
     crowns.push({ tip: new T.Vector3(bend, (maple ? 4.6 : 5.1) * growth, 0), radius: .95 });
     const wood = new T.Mesh(T.mergeGeometries(branches), barkMaterial); wood.castShadow = wood.receiveShadow = true; root.add(wood); branches.forEach(g => g.dispose());
-    const count = maple ? 6400 : 8400, leaves = new T.InstancedMesh(leafGeometry, foliageMaterial, count), tint = new T.Color();
+    const count = Math.round((maple ? 6400 : 8400) * spread ** 1.4), leaves = new T.InstancedMesh(leafGeometry, foliageMaterial, count), tint = new T.Color();
     for (let i = 0; i < count; i++) {
       const { tip, radius } = crowns[i % crowns.length], a = random() * Math.PI * 2, y = random() * 2 - 1, r = Math.sqrt(1 - y * y) * Math.cbrt(random());
       pose.position.set(tip.x + Math.cos(a) * r * radius, tip.y + y * radius * .73, tip.z + Math.sin(a) * r * radius);

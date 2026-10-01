@@ -45,7 +45,11 @@ FPS.models.pocketPaving = (T, o = {}) => {
       uv.setXY(i, (side ? positions.getZ(i) : positions.getX(i)) * repeat, (up ? positions.getZ(i) : positions.getY(i)) * repeat);
     }
     const c = new T.Color(color), colors = [];
-    for (let i = 0; i < g.attributes.position.count; i++) colors.push(c.r, c.g, c.b);
+    for (let i = 0; i < positions.count; i++) {
+      const x = positions.getX(i), z = positions.getZ(i), rim = Math.min(w / 2 - Math.abs(x), d / 2 - Math.abs(z));
+      const shade = .97 - .09 * Math.exp(-Math.max(0, rim) * 8) + .025 * Math.sin(x * .73 + z * .51);
+      colors.push(c.r * shade, c.g * shade, c.b * shade);
+    }
     g.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
     if (!groups.has(kind)) groups.set(kind, []); groups.get(kind).push(g);
   }
@@ -69,8 +73,11 @@ FPS.models.pocketPaving = (T, o = {}) => {
   for (const side of [-1, 1]) box([w, .075, .11], [0, .0375, side * (d / 2 - .055)], 0x9ba39c, o.garden ? 'stone' : surface);
   for (const [kind, parts] of groups) {
     const mesh = new T.Mesh(T.mergeGeometries(parts), material(T, kind));
+    mesh.userData.softGround = kind === 'gravel';
     mesh.receiveShadow = true; root.add(mesh); parts.forEach(g => g.dispose());
   }
-  return { root };
+  return { root, onHit(hit) {
+    if (hit.object.userData.softGround) return { bulletmark: false, surface: 'soil' };
+  } };
 };
 })();

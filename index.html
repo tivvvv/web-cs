@@ -457,11 +457,14 @@ function damagePlayer(amount, source) {
 function shoot(from, direction, team, damage) {
   gunSound(from, team);
   scene.updateMatrixWorld(true);
-  const targets = [...new Set(solid.map(s => s.root))].concat(team === 'player' ? actors.filter(a => a.alive && !a.disabled).map(a => a.root) : []);
+  // 可接收命中的装饰地面也参与射击, 无需为了弹痕增加身体碰撞盒.
+  const surfaces = entries.filter(e => e.onHit && !e.disabled && !e.body && e.data.attach !== 'camera').map(e => e.root);
+  const targets = [...new Set([...solid.map(s => s.root), ...surfaces])].concat(team === 'player' ? actors.filter(a => a.alive && !a.disabled).map(a => a.root) : []);
   // 装饰线的拾取有距离容差, 不能用作弹痕表面; 只接受真实三角面命中.
   const ray = new T.Raycaster(from, direction, .025, 100), contact = ray.intersectObjects(targets, true).find(hit => hit.object.isMesh && hit.face);
   let distance = contact?.distance ?? 100, end = contact ? contact.point.clone() : from.clone().addScaledVector(direction, distance);
   let didHit = !!contact, character = false, bulletmark = true, impact = true;
+  let surface;
   const normal = direction.clone().negate();
   if (contact) {
     const world = contact.object.matrixWorld.clone();
@@ -494,12 +497,13 @@ function shoot(from, direction, team, damage) {
     if (target && !target.disabled) guarded(target.id + ' 命中', () => {
       const response = target.onHit({ ...contact, direction, normal, damage, team }, api);
       bulletmark = response?.bulletmark !== false; impact = response?.impact !== false;
+      surface = response?.surface;
     });
   }
   const origin = team === 'player' && !weapon?.disabled && weapon?.muzzle ? weapon.muzzle.getWorldPosition(new T.Vector3()) : from;
   // 命中仍即时结算, 弹道与冲击仅负责视觉反馈, 近距离命中避免光束从墙后反向出现.
   effect('tracer', { from: from.distanceTo(origin) < distance ? origin : from, to: end, color: team === 'player' ? 0xffd779 : 0xff7945 });
-  if (didHit && impact) effect('impact', { position: end, normal, character });
+  if (didHit && impact) effect('impact', { position: end, normal, character, surface });
   if (team === 'player' && contact && bulletmark) effect('bulletmark', { position: end, normal, direction, parent: contact.object, limit: 64 });
   return { distance: from.distanceTo(end), hit: didHit };
 }
@@ -813,7 +817,8 @@ async function boot() {
     if (light.isDirectionalLight) {
       light.target.position.set(...tuple(l.target, [0, 0, 0])); scene.add(light.target); light.castShadow = !!l.shadow;
       const extent = l.shadowExtent || 38;
-      Object.assign(light.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 1, far: l.shadowFar || 90 }); light.shadow.mapSize.set(2048, 2048); light.shadow.bias = l.shadowBias ?? -.0004; light.shadow.normalBias = .035;
+      const shadowSize = Math.min(renderer.capabilities.maxTextureSize, l.shadowSize || 2048);
+      Object.assign(light.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 1, far: l.shadowFar || 90 }); light.shadow.mapSize.set(shadowSize, shadowSize); light.shadow.bias = l.shadowBias ?? -.0004; light.shadow.normalBias = .035;
       light.shadow.autoUpdate = !l.staticShadow; light.shadow.needsUpdate = true;
     }
   });

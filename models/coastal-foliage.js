@@ -5,14 +5,14 @@ FPS.models.coastalFoliage = (T, options = {}) => {
   const tree = options.kind === 'tree', shrub = options.kind === 'shrub';
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
   const ctx = canvas.getContext('2d'), gradient = ctx.createLinearGradient(0, 0, 256, 0);
-  gradient.addColorStop(0, '#435e2b'); gradient.addColorStop(.47, '#81934b'); gradient.addColorStop(.51, '#b1ad67'); gradient.addColorStop(1, '#536f34');
+  gradient.addColorStop(0, '#718357'); gradient.addColorStop(.47, '#9aaa76'); gradient.addColorStop(.51, '#bac395'); gradient.addColorStop(1, '#7b8e63');
   ctx.fillStyle = gradient; ctx.fillRect(0, 0, 256, 256); ctx.lineWidth = 1.1; ctx.strokeStyle = '#afae6d99';
   for (let y = 25; y < 248; y += 25) for (const side of [-1, 1]) {
     ctx.beginPath(); ctx.moveTo(128, y); ctx.quadraticCurveTo(128 + side * 47, y + 12, 128 + side * 120, y + 47); ctx.stroke();
   }
   const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
-  const leafMaterial = new T.MeshStandardMaterial({ map, color: 0xb6ca8c, roughness: .71, side: T.DoubleSide });
-  const leaf = new T.PlaneGeometry(1, 1, 4, 10), positions = leaf.attributes.position;
+  const leafMaterial = new T.MeshStandardMaterial({ map, roughness: .88, side: T.DoubleSide });
+  const leaf = new T.PlaneGeometry(1, 1, 2, 6), positions = leaf.attributes.position;
   for (let i = 0; i < positions.count; i++) {
     const x = positions.getX(i), y = positions.getY(i) + .5;
     positions.setXYZ(i, x * Math.pow(Math.sin(Math.PI * y), .72) * .62, y, .12 * Math.sin(y * Math.PI) - Math.abs(x) * .17);
@@ -25,8 +25,8 @@ FPS.models.coastalFoliage = (T, options = {}) => {
     const a = random() * Math.PI * 2, radius = Math.sqrt(random()) * spread, size = tree ? .32 + random() * .29 : .19 + random() * .17;
     dummy.position.set(Math.cos(a) * radius, base + random() * (tree ? 2.6 : .8) - radius * (tree ? .18 : .28), Math.sin(a) * radius);
     dummy.rotation.set(-.65 + random() * 1.5, a + random(), (random() - .5) * 2.7);
-    dummy.scale.set(size * 1.45, size, size); dummy.updateMatrix(); leaves.setMatrixAt(i, dummy.matrix);
-    leaves.setColorAt(i, new T.Color().setHSL(.20 + random() * .1, .26 + random() * .14, .45 + random() * .24));
+    dummy.scale.set(size * 1.25, size, size); dummy.updateMatrix(); leaves.setMatrixAt(i, dummy.matrix);
+    leaves.setColorAt(i, new T.Color().setHSL(.22 + random() * .06, .18 + random() * .1, .63 + random() * .16));
   }
   leaves.castShadow = leaves.receiveShadow = true; root.add(leaves);
   const bark = new T.MeshStandardMaterial({ color: tree ? 0x6c6651 : 0x667344, roughness: .98 }), stems = [];
@@ -48,13 +48,20 @@ FPS.models.coastalFoliage = (T, options = {}) => {
   if (!tree && !shrub) {
     const petals = [];
     for (let i = 0; i < 4; i++) {
-      const g = new T.SphereGeometry(1, 8, 5), p = new T.Mesh(g);
+      // 四片弧形花瓣保留外轮廓, 细分球改为曲面扇形, 降低大量花头的顶点成本.
+      const vertices = [], uv = [], segments = 10;
+      for (let j = 0; j < segments; j++) for (const k of [-1, j, j + 1]) {
+        const a = k < 0 ? 0 : k * Math.PI * 2 / segments;
+        vertices.push(k < 0 ? 0 : Math.cos(a), k < 0 ? .45 : -.1 + .08 * Math.cos(a * 2), k < 0 ? 0 : Math.sin(a));
+        uv.push(k < 0 ? .5 : .5 + Math.cos(a) * .5, k < 0 ? .5 : .5 + Math.sin(a) * .5);
+      }
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(vertices, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2)); g.computeVertexNormals(); const p = new T.Mesh(g);
       const a = i * Math.PI / 2; p.scale.set(.032, .014, .046); p.rotation.y = a;
       p.position.set(Math.sin(a) * .032, 0, Math.cos(a) * .032); p.updateMatrix(); petals.push(g.applyMatrix4(p.matrix));
     }
     const floret = T.mergeGeometries(petals); petals.forEach(g => g.dispose());
     const heads = options.blooms ?? 13, perHead = 48;
-    const flowers = new T.InstancedMesh(floret, new T.MeshStandardMaterial({ color: 0xffffff, roughness: .74, side: T.DoubleSide }), heads * perHead);
+    const flowers = new T.InstancedMesh(floret, new T.MeshStandardMaterial({ color: 0xffffff, roughness: .88, side: T.DoubleSide }), heads * perHead);
     const center = new T.Vector3(), normal = new T.Vector3();
     for (let h = 0; h < heads; h++) {
       const a = h * 2.4, r = .2 + random() * .61;

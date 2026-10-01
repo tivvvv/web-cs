@@ -45,5 +45,6 @@ FPS.models.parkTerrain = (T, o = {}) => {
   }
   const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace; map.anisotropy = 8;
   const mesh = new T.Mesh(g, new T.MeshStandardMaterial({ vertexColors: true, map, bumpMap: map, bumpScale: .004, roughness: 1 }));
-  mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); return { root };
+  mesh.castShadow = mesh.receiveShadow = true; root.add(mesh);
+  return { root, onHit() { return { bulletmark: false, surface: 'soil' }; } };
 };

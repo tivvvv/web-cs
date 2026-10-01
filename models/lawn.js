@@ -1,6 +1,7 @@
 // 修剪草坪: 收边与土面静态合批, 短草实例化并随风轻动.
 FPS.models.lawn = (T, o = {}) => {
   const root = new T.Group(), parts = [], canvas = document.createElement('canvas');
+  const softFaces = []; let faceCount = 0, ground;
   canvas.width = canvas.height = 256;
   const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(256, 256);
   let seed = 819;
@@ -20,7 +21,9 @@ FPS.models.lawn = (T, o = {}) => {
   }
   const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
   map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4;
-  function add(g, outer, inner = outer, repeat = 1 / 1.2) {
+  function add(g, outer, inner = outer, repeat = 1 / 1.2, soft = false) {
+    const faces = (g.index?.count ?? g.attributes.position.count) / 3;
+    if (soft) softFaces.push([faceCount, faceCount + faces]); faceCount += faces;
     const p = g.attributes.position, colors = [], uv = [], palette = [new T.Color(outer), new T.Color(inner)];
     for (let i = 0; i < p.count; i++) {
       uv.push(p.getX(i) * repeat, p.getZ(i) * repeat);
@@ -32,14 +35,14 @@ FPS.models.lawn = (T, o = {}) => {
   }
   for (const [x, y, z, w, d] of o.patches ?? []) {
     // 收边和草根均向原地块内收, 石条底部埋入地面, 不占用通道.
-    function ring(inset, band, edgeY, outer, inner = outer, repeat = 1 / 1.2) {
+    function ring(inset, band, edgeY, outer, inner = outer, repeat = 1 / 1.2, soft = false) {
       const positions = [], indices = [];
       for (const [offset, lift] of [[inset, edgeY], [inset + band, .006]]) {
         for (const [sx, sz] of [[-1, -1], [-1, 1], [1, 1], [1, -1]]) positions.push(x + sx * (w / 2 - offset), y + lift, z + sz * (d / 2 - offset));
       }
       for (let i = 0; i < 4; i++) { const j = (i + 1) % 4; indices.push(i, j, i + 4, j, j + 4, i + 4); }
       const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(positions, 3));
-      g.setIndex(indices); g.computeVertexNormals(); add(g, outer, inner, repeat);
+      g.setIndex(indices); g.computeVertexNormals(); add(g, outer, inner, repeat, soft);
     }
     ring(0, .1, .003, 0x929184, 0x929184, 6); // 低于石面的接缝底色, 避免缝隙露出亮色铺地.
     // 约 60 厘米一块, 接缝 6 毫米; 顶面高 18 毫米, 上沿做 4 毫米倒角.
@@ -57,12 +60,12 @@ FPS.models.lawn = (T, o = {}) => {
         add(g, color, color, 6);
       }
     }
-    ring(.1, .05, .006, 0x948366, 0x879860); // 5 厘米土色逐渐融入短草.
-    add(new T.PlaneGeometry(w - .3, d - .3).rotateX(-Math.PI / 2).translate(x, y + .006, z), 0x879860);
+    ring(.1, .05, .006, 0x948366, 0x879860, 1 / 1.2, true); // 5 厘米土色逐渐融入短草.
+    add(new T.PlaneGeometry(w - .3, d - .3).rotateX(-Math.PI / 2).translate(x, y + .006, z), 0x879860, 0x879860, 1 / 1.2, true);
   }
   if (parts.length) {
-    const mesh = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .003, vertexColors: true, roughness: 1 }));
-    mesh.receiveShadow = true; root.add(mesh); parts.forEach(g => g.dispose());
+    ground = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .003, vertexColors: true, roughness: 1 }));
+    ground.receiveShadow = true; root.add(ground); parts.forEach(g => g.dispose());
   }
   const positions = [];
   for(let i=0;i<3;i++) {
@@ -105,5 +108,8 @@ FPS.models.lawn = (T, o = {}) => {
     tint.set([0x73894b,0x82945a,0x647e46,0x8b9b5d][i%4]); grass.setColorAt(index++,tint);
   }
   grass.receiveShadow=true; grass.raycast=()=>{}; root.add(grass);
-  return { root, update(dt) { wind.value += dt; } };
+  return { root, onHit(hit) {
+    // 合批面编号区分草土与石沿, 不增加网格或身体碰撞.
+    if (hit.object === ground && softFaces.some(([a, b]) => hit.faceIndex >= a && hit.faceIndex < b)) return { bulletmark: false, surface: 'soil' };
+  }, update(dt) { wind.value += dt; } };
 };

@@ -1,6 +1,7 @@
 // 白砂留白, 石组回纹与起伏苔岸; 砂面在苔岛处挖空, 静态纹理和几何只在初始化生成.
 FPS.models.dryGarden = (T, o = {}) => {
   const root = new T.Group(), w = o.width ?? 12, d = o.depth ?? 8, parts = [], mossParts = [];
+  const gravelFaces = []; let faceCount = 0;
   const islands = o.islands ?? (o.stones ?? []).map(([x, z, sw, , sd]) => [x, z, sw * .67, sd * .65, 0]);
   const resolution = Math.max(w, d) > 16 ? 2048 : 1024, sw = w - .52, sd = d - .52, sandY = o.sandHeight ?? .09, edgeY = o.edgeHeight ?? .14;
   function canvas(size) { const c = document.createElement('canvas'); c.width = c.height = size; return c; }
@@ -54,13 +55,43 @@ FPS.models.dryGarden = (T, o = {}) => {
   const sandGeometry = new T.ShapeGeometry(shape).rotateX(-Math.PI / 2), sandP = sandGeometry.attributes.position, sandUV = sandGeometry.attributes.uv;
   for (let i = 0; i < sandP.count; i++) sandUV.setXY(i, sandP.getX(i) / sw + .5, .5 - sandP.getZ(i) / sd);
   const sand = new T.Mesh(sandGeometry, new T.MeshStandardMaterial({ map, bumpMap: texture(relief), bumpScale: .012, roughness: 1 }));
+  const microCanvas = canvas(256), microCtx = microCanvas.getContext('2d'), microPixels = microCtx.createImageData(256, 256);
+  for (let i = 0; i < microPixels.data.length; i += 4) { const v = 225 + random() * 30; microPixels.data.set([v, v, v, 255], i); }
+  microCtx.putImageData(microPixels, 0, 0);
+  for (let i = 0; i < 3400; i++) {
+    const x = random() * 256, y = random() * 256, r = .8 + random() * 1.2;
+    for (const dx of [-256, 0, 256]) for (const dy of [-256, 0, 256]) {
+      microCtx.fillStyle = i % 3 ? '#e9e7df' : '#d5d3c9'; microCtx.beginPath(); microCtx.ellipse(x + dx, y + dy, r, r * .64, i, 0, Math.PI * 2); microCtx.fill();
+    }
+  }
+  const sandGrain = texture(microCanvas, true); sandGrain.colorSpace = T.SRGBColorSpace;
+  sand.material.customProgramCacheKey = () => 'dry-garden-sand-grain-v1';
+  sand.material.onBeforeCompile = shader => {
+    shader.uniforms.sandGrain = { value: sandGrain };
+    shader.vertexShader = 'varying vec2 sandXZ;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nsandXZ=position.xz/ .64;');
+    shader.fragmentShader = 'uniform sampler2D sandGrain; varying vec2 sandXZ;\n' + shader.fragmentShader
+      .replace('#include <map_fragment>', '#include <map_fragment>\nvec3 gravelGrain=texture2D(sandGrain,sandXZ).rgb; diffuseColor.rgb*=mix(vec3(1.),gravelGrain,.22);')
+      .replace('#include <normal_fragment_maps>', '#include <normal_fragment_maps>\nfloat microHeight=gravelGrain.g*.001; normal=perturbNormalArb(-vViewPosition,normal,vec2(dFdx(microHeight),dFdy(microHeight)),faceDirection);');
+  };
   sand.name = 'dry-garden-sand'; sand.position.y = sandY; sand.receiveShadow = true; root.add(sand);
-  function add(g, color, target = parts) {
+  function add(g, color, target = parts, loose = false) {
     if (g.index) { const source = g; g = source.toNonIndexed(); source.dispose(); }
+    if (target === parts) {
+      const faces = g.attributes.position.count / 3;
+      if (loose) gravelFaces.push([faceCount, faceCount + faces]); faceCount += faces;
+    }
     const c = new T.Color(color), colors = [], uv = [], p = g.attributes.position, n = g.attributes.normal;
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i), z = p.getZ(i);
       const shade = target === mossParts ? .87 + .1 * Math.sin(x * 4 + z * 3) + .045 * Math.sin(x * 13 + z * 9) : .98 + .02 * Math.sin(x * 9 + z * 6);
+      if (target === mossParts) {
+        c.set(color);
+        const radius = Math.min(...islands.map(([cx, cz, rx, rz, yaw = 0]) => {
+          const dx = x - cx, dz = z - cz;
+          return Math.hypot((dx * Math.cos(yaw) + dz * Math.sin(yaw)) / rx, (-dx * Math.sin(yaw) + dz * Math.cos(yaw)) / rz);
+        }));
+        c.lerp(new T.Color(0x747652), Math.max(0, Math.min(.32, (radius - .88) * 2)));
+      }
       colors.push(c.r * shade, c.g * shade, c.b * shade);
       uv.push((Math.abs(n.getX(i)) > .6 ? z : x) * 3, (Math.abs(n.getY(i)) > .6 ? z : p.getY(i)) * 3);
     }
@@ -104,7 +135,7 @@ FPS.models.dryGarden = (T, o = {}) => {
     // 少量半埋碎石散落在苔岸边缘, 大片砂面仍然留白.
     for (let i = 0; i < 8; i++) {
       const a = index * 1.7 + (i < 4 ? .45 : 3.6) + random() * .4, [x, z] = contour(island, a, .045 + random() * .08, index), size = .045 + random() * .035;
-      add(new T.IcosahedronGeometry(1, 0).scale(size, size * .38, size * (.65 + random() * .35)).rotateY(a).translate(x, sandY + size * .12, z), [0x8c8b7b, 0xa9a595, 0x747970][i % 3]);
+      add(new T.IcosahedronGeometry(1, 0).scale(size, size * .38, size * (.65 + random() * .35)).rotateY(a).translate(x, sandY + size * .12, z), [0x8c8b7b, 0xa9a595, 0x747970][i % 3], parts, true);
     }
   });
   const stoneCanvas = canvas(128), stoneCtx = stoneCanvas.getContext('2d'), stonePixels = stoneCtx.createImageData(128, 128);
@@ -130,5 +161,7 @@ FPS.models.dryGarden = (T, o = {}) => {
     const moss = new T.Mesh(T.mergeGeometries(mossParts), new T.MeshStandardMaterial({ vertexColors: true, map: mossMap, bumpMap: mossMap, bumpScale: .012, roughness: 1 }));
     moss.name = 'dry-garden-moss'; moss.castShadow = moss.receiveShadow = true; root.add(moss); mossParts.forEach(g => g.dispose());
   }
-  return { root };
+  return { root, onHit(hit) {
+    if (hit.object === sand || hit.object === gravel || hit.object.name === 'dry-garden-moss' || (hit.object === edging && gravelFaces.some(([a, b]) => hit.faceIndex >= a && hit.faceIndex < b))) return { bulletmark: false, surface: 'soil' };
+  }, dispose() { sandGrain.dispose(); } };
 };

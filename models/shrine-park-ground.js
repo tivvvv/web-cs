@@ -92,6 +92,24 @@ FPS.models.shrineParkGround = (T, o = {}) => {
   }
   grainCtx.putImageData(grainPixels, 0, 0); const grain = new T.CanvasTexture(grainCanvas);
   grain.wrapS = grain.wrapT = T.RepeatWrapping; grain.anisotropy = 8;
+  // 参道独立使用米制石板纹理, 接缝/磨边写入高度图; 世界底图继续负责草地与曲线园路.
+  const stoneCanvas = document.createElement('canvas'); stoneCanvas.width = stoneCanvas.height = 1024;
+  const stoneCtx = stoneCanvas.getContext('2d'), stonePixels = stoneCtx.createImageData(1024, 1024), heightPixels = stoneCtx.createImageData(1024, 1024);
+  for (let y = 0; y < 1024; y++) for (let x = 0; x < 1024; x++) {
+    const wx = x / 1024 * 3, wz = y / 1024 * 3.2, row = Math.floor(wz / .8), col = Math.floor(wx + (row % 2) * .5);
+    const u = (wx + (row % 2) * .5) % 1, v = wz % .8, edge = Math.min(u, 1 - u, v, .8 - v);
+    const piece = Math.sin(col * 13.1 + row * 47.7), grain = (random() - .5) * 21;
+    const patch = Math.sin(wx * 6 + Math.sin(wz * 9)) * Math.sin(wz * 5 - wx * 3) * 6;
+    const joint = edge < .012, worn = Math.max(0, 1 - edge / .035);
+    const value = (joint ? 93 : 168 + piece * 9 + patch - worn * 7) + grain;
+    stonePixels.data.set([value - 3, value + 1, value - 8, 255], (y * 1024 + x) * 4);
+    const h = joint ? 25 : 188 - worn * 60 + grain * .5;
+    heightPixels.data.set([h, h, h, 255], (y * 1024 + x) * 4);
+  }
+  stoneCtx.putImageData(stonePixels, 0, 0); const stoneMap = new T.CanvasTexture(stoneCanvas); stoneMap.colorSpace = T.SRGBColorSpace;
+  const heightCanvas = document.createElement('canvas'); heightCanvas.width = heightCanvas.height = 1024;
+  heightCanvas.getContext('2d').putImageData(heightPixels, 0, 0); const stoneHeight = new T.CanvasTexture(heightCanvas);
+  for (const texture of [stoneMap, stoneHeight]) { texture.wrapS = texture.wrapT = T.RepeatWrapping; texture.anisotropy = 8; }
   function curb(ax, az, bx, bz) {
     const length = Math.hypot(bx - ax, bz - az), count = Math.ceil(length / .8);
     for (let i = 0; i < count; i++) {
@@ -105,7 +123,7 @@ FPS.models.shrineParkGround = (T, o = {}) => {
     const k = kind(x, z); if (k < 0) continue; // 负值分区留给下凹池塘, 不再覆盖地面.
     const g = new T.PlaneGeometry(b - a, d - c).rotateX(-Math.PI / 2).translate(x, .024, z), p = g.attributes.position;
     const uv = g.attributes.uv;
-    for (let n = 0; n < p.count; n++) uv.setXY(n, (p.getX(n) - x0) / (x1 - x0), 1 - (p.getZ(n) - z0) / (z1 - z0));
+    for (let n = 0; n < p.count; n++) uv.setXY(n, k === 1 ? p.getX(n) / 3 : (p.getX(n) - x0) / (x1 - x0), k === 1 ? -p.getZ(n) / 3.2 : 1 - (p.getZ(n) - z0) / (z1 - z0));
     parts[k].push(g);
     if (k === 2) {
       if (hardEdge(a - .001, z) || a === x0) curb(a, c, a, d);
@@ -115,15 +133,18 @@ FPS.models.shrineParkGround = (T, o = {}) => {
     }
   }
   for (let k = 0; k < 3; k++) if (parts[k].length) {
-    const material = new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .012, roughness: 1 });
-    material.customProgramCacheKey = () => 'park-ground-grain-v1';
-    material.onBeforeCompile = shader => {
+    const material = new T.MeshStandardMaterial({ map: k === 1 ? stoneMap : map, bumpMap: k === 1 ? stoneHeight : map, bumpScale: k === 1 ? .005 : .012, roughness: k === 1 ? .92 : 1 });
+    material.customProgramCacheKey = () => 'park-ground-grain-v2/' + k + '/' + (x1 - x0) + '/' + (z1 - z0);
+    if (k !== 1) material.onBeforeCompile = shader => {
       shader.uniforms.parkGrain = { value: grain };
       shader.fragmentShader = 'uniform sampler2D parkGrain;\n' + shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>\n diffuseColor.rgb *= .88 + .24 * texture2D(parkGrain, vMapUv * vec2(${(x1 - x0) / 1.6}, ${(z1 - z0) / 1.6})).r;`);
     };
     const mesh = new T.Mesh(T.mergeGeometries(parts[k]), material);
+    mesh.userData.softGround = k !== 1;
     mesh.receiveShadow = true; root.add(mesh); parts[k].forEach(g => g.dispose());
   }
   if (edges.length) { const mesh = new T.Mesh(T.mergeGeometries(edges), new T.MeshStandardMaterial({ color: 0xa7ada0, roughness: .94 })); mesh.receiveShadow = true; root.add(mesh); edges.forEach(g => g.dispose()); }
-  return { root };
+  return { root, onHit(hit) {
+    if (hit.object.userData.softGround) return { bulletmark: false, surface: 'soil' };
+  } };
 };

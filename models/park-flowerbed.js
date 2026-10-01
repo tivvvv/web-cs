@@ -5,13 +5,14 @@ FPS.models.parkFlowerbed = (T, o = {}) => {
   const soil = new T.CylinderGeometry(1, 1, .1, 32).scale(w / 2, 1, d / 2).translate(0, .015, 0);
   const rim = new T.TorusGeometry(1, .016, 5, 48).rotateX(Math.PI / 2).scale(w / 2, 1, d / 2).translate(0, .071, 0);
   const parts = [soil, rim];
+  const soilFaces = soil.index.count / 3; let bed;
   for (const [i, g] of parts.entries()) {
     const c = new T.Color(i ? 0x8b9582 : 0x706044), colors = [];
     for (let j = 0; j < g.attributes.position.count; j++) colors.push(c.r, c.g, c.b);
     g.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
   }
   if (!o.natural) {
-    const bed = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
+    bed = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
     bed.receiveShadow = true; root.add(bed);
   }
   parts.forEach(g => g.dispose());
@@ -66,5 +67,7 @@ FPS.models.parkFlowerbed = (T, o = {}) => {
   }
   foliage.castShadow = foliage.receiveShadow = true; foliage.raycast = () => {}; root.add(foliage);
   if (blooms) { blooms.receiveShadow = true; blooms.raycast = () => {}; root.add(blooms); } else flower.dispose();
-  return { root };
+  return { root, onHit(hit) {
+    if (hit.object === bed && hit.faceIndex < soilFaces) return { bulletmark: false, surface: 'soil' };
+  } };
 };

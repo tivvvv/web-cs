@@ -32,17 +32,45 @@ FPS.models.kamakuraStation = (T, options = {}) => {
   wood.map=wood.bumpMap=woodMap; wood.bumpScale=.004;
   iron.roughnessMap=roof.roughnessMap=aggregate;
   roof.bumpMap=aggregate; roof.bumpScale=.002;
+  const paintCanvas = document.createElement('canvas'); paintCanvas.width = paintCanvas.height = 512;
+  const pc = paintCanvas.getContext('2d'), paintPixels = pc.createImageData(512, 512);
+  for (let y = 0; y < 512; y++) for (let x = 0; x < 512; x++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const broad = Math.sin(x * Math.PI / 128 + Math.sin(y * Math.PI / 128)) * Math.sin(y * Math.PI / 256);
+    const v = 232 + broad * 9 + (seed / 4294967296 - .5) * 8;
+    paintPixels.data.set([v, v, v - 3, 255], (y * 512 + x) * 4);
+  }
+  pc.putImageData(paintPixels, 0, 0); const coating = new T.CanvasTexture(paintCanvas); coating.colorSpace = T.SRGBColorSpace;
+  coating.wrapS = coating.wrapT = T.RepeatWrapping; coating.anisotropy = 8;
+  roof.map = roof.roughnessMap = coating; roof.metalness = .15; roof.roughness = .72;
+  for (const m of [concrete, fascia, roof, iron]) m.vertexColors = true;
   function add(source, p, m, r = [0, 0, 0]) {
     const g = source.index ? source.toNonIndexed() : source; if (g !== source) source.dispose();
     const mesh = new T.Mesh(g, m); mesh.position.set(...p); mesh.rotation.set(...r); mesh.updateMatrix();
     g.applyMatrix4(mesh.matrix);
     if (m.map) {
-      const a = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv, repeat = m === wood ? 1.2 : m === asphalt ? 3 : 5;
+      const a = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv, repeat = m === wood ? 1.2 : m === roof ? .4 : m === asphalt ? 3 : 5;
       for (let i = 0; i < a.count; i++) uv.setXY(i, (Math.abs(n.getX(i)) > .5 ? a.getZ(i) : a.getX(i)) * repeat, (Math.abs(n.getY(i)) > .5 ? a.getZ(i) : a.getY(i)) * repeat);
     }
+    const a = g.attributes.position, n = g.attributes.normal, colors = [];
+    for (let i = 0; i < a.count; i++) {
+      const underside = (m === roof || m === iron) && n.getY(i) < -.5 ? .78 : 1;
+      const weather = m === concrete || m === iron ? .82 + .18 * Math.min(1, Math.max(0, a.getY(i) / .9)) : 1;
+      colors.push(underside * weather, underside * weather, underside * weather);
+    }
+    g.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
     if (!batches.has(m)) batches.set(m, []); batches.get(m).push(g);
   }
-  const box = (s, p, m, r) => add(new T.BoxGeometry(...s), p, m, r);
+  function box(s, p, m, r) {
+    let g;
+    if (m === wood) {
+      const b = .004, shape = new T.Shape();
+      shape.moveTo(-s[0] / 2 + b, -s[1] / 2 + b); shape.lineTo(s[0] / 2 - b, -s[1] / 2 + b);
+      shape.lineTo(s[0] / 2 - b, s[1] / 2 - b); shape.lineTo(-s[0] / 2 + b, s[1] / 2 - b); shape.closePath();
+      g = new T.ExtrudeGeometry(shape, { depth: s[2] - b * 2, bevelEnabled: true, bevelSize: b, bevelThickness: b, bevelSegments: 1 }).translate(0, 0, -s[2] / 2 + b);
+    } else g = new T.BoxGeometry(...s);
+    add(g, p, m, r);
+  }
   function sign(lines, w, h, position, background = '#f1eddc') {
     const c = document.createElement('canvas'); c.width = 1024; c.height = 512;
     const ctx = c.getContext('2d'); ctx.fillStyle = background; ctx.fillRect(0, 0, 1024, 512);
@@ -95,6 +123,9 @@ FPS.models.kamakuraStation = (T, options = {}) => {
     box([.3, .18, .3], [x, .81, .65], concrete);
     box([.095, .09, 3.2], [x, 3.24 + lift, 0], iron);
     box([.075, .07, 1.2], [x, 2.96 + lift, .18], iron, [0.48, 0, 0]);
+    box([.25, .22, .02], [x, 3.15 + lift, .735], iron);
+    for (const dx of [-.09, .09]) for (const dy of [-.07, .07])
+      add(new T.CylinderGeometry(.014, .014, .014, 6), [x + dx, 3.15 + lift + dy, .753], iron, [Math.PI / 2, 0, 0]);
   }
   box([29.5, .105, 3.45], [-1, 3.43 + lift, 0], roof, [.06, 0, 0]);
   for (let x = -15.7; x < 14; x += .36) box([.025, .04, 3.46], [x, 3.50 + lift, 0], iron, [.06, 0, 0]);

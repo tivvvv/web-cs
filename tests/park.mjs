@@ -35,7 +35,11 @@ try {
       return { ok: true, position: player.position.toArray(), maxHeight };
     }
     const trails = ground.data.options.trails.map(t => walk(t.points));
-    const bridge = walk(Array.from({ length: 91 }, (_, i) => [3 + i * .5, 123]));
+    const bridgePaths = [-.75, 0, .75].flatMap(side => [
+      Array.from({ length: 91 }, (_, i) => [3 + i * .5, 123 + side]),
+      Array.from({ length: 91 }, (_, i) => [48 - i * .5, 123 + side])
+    ]);
+    const bridge = bridgePaths.map(walk);
     const deck = walk(Array.from({ length: 61 }, (_, i) => [46.5, 108 + i * .2]));
     const hill = walk(Array.from({ length: 81 }, (_, i) => [-25 + i * .125, 132]));
     const northShore = walk(Array.from({ length: 89 }, (_, i) => [4 + i * .5, 146.1]));
@@ -48,8 +52,102 @@ try {
     return { trails, bridge, deck, hill, northShore, eastShore, shrineSteps, basinLoop, gardenGate, westBoundary, northBoundary };
   });
   walks.trails.forEach((r, i) => assert(r.ok, `园路 ${i}: ${JSON.stringify(r)}`));
-  for (const key of ['bridge', 'deck', 'hill', 'northShore', 'eastShore', 'shrineSteps', 'basinLoop', 'gardenGate', 'westBoundary', 'northBoundary']) assert(walks[key].ok, `${key}: ${JSON.stringify(walks[key])}`);
+  walks.bridge.forEach((r, i) => assert(r.ok, `桥面双向通行 ${i}: ${JSON.stringify(r)}`));
+  for (const key of ['deck', 'hill', 'northShore', 'eastShore', 'shrineSteps', 'basinLoop', 'gardenGate', 'westBoundary', 'northBoundary']) assert(walks[key].ok, `${key}: ${JSON.stringify(walks[key])}`);
   assert(walks.hill.maxHeight > 2.8, '缓丘应提供升高支撑');
+  const bridgeSupport = await page.evaluate(() => {
+    const e = entries.find(e => e.id === 'park-lake-bridge'), deck = e.data.options.deck;
+    const ray = new THREE.Raycaster(), down = new THREE.Vector3(0, -1, 0), heights = [];
+    for (const step of deck) {
+      const point = e.root.position.clone().add(new THREE.Vector3(...step.offset)), expected = point.y + step.size[1] / 2;
+      ray.set(new THREE.Vector3(point.x, expected + 10, point.z), down);
+      const visual = ray.intersectObject(e.root, true)[0]?.point.y;
+      const collision = Math.max(...solid.filter(s => s.id === e.id && footprint(point, .001, s.box)).map(s => s.box.max.y));
+      heights.push({ expected, visual, collision });
+    }
+    return { heights, stepLimit: STEP_HEIGHT, maxRiser: Math.max(...heights.slice(1).map((h, i) => Math.abs(h.expected - heights[i].expected))) };
+  });
+  assert(bridgeSupport.maxRiser <= bridgeSupport.stepLimit, '桥面级差不能超过自动登阶高度');
+  bridgeSupport.heights.forEach(h => {
+    assert(Math.abs(h.visual - h.expected) < .001, '桥面造型应与踏步配置一致');
+    assert(Math.abs(h.collision - h.visual) < .001, '合并桥面/拱腹碰撞后, 支撑顶面应与造型一致');
+  });
+  const bamboo = await page.evaluate(() => {
+    const e = entries.find(e => e.id === 'park-bamboo-groves'), culms = e.data.options.culms, boxes = solid.filter(s => s.id === e.id);
+    const ray = new THREE.Raycaster(), offsets = [], stops = [], stopDetails = [], faceMatches = [];
+    for (const c of culms) {
+      const y = 1, t = y / c.height, x = c.foot[0] + c.lean[0] * t, z = c.foot[2] + c.lean[1] * t;
+      ray.set(new THREE.Vector3(x - .2, e.root.position.y + c.foot[1] + y, z), new THREE.Vector3(1, 0, 0));
+      const hit = ray.intersectObject(e.root, true)[0]; offsets.push(hit ? Math.abs(hit.point.x - x) : Infinity);
+      if (hit) {
+        const index = hit.object.geometry.index, i = hit.faceIndex * 3;
+        faceMatches.push(index.getX(i) === hit.face.a && index.getX(i + 1) === hit.face.b && index.getX(i + 2) === hit.face.c);
+      }
+    }
+    let area = 0, fullArea = 0, openCorners = 0;
+    for (let i = 0; i < boxes.length; i += 3) {
+      const group = boxes.slice(i, i + 3), bounds = new THREE.Box3(); group.forEach(s => bounds.union(s.box));
+      area += group.reduce((sum, s) => sum + (s.box.max.x - s.box.min.x) * (s.box.max.z - s.box.min.z), 0);
+      const members = culms.filter(c => bounds.clone().expandByScalar(.001).containsPoint(new THREE.Vector3(c.foot[0], e.root.position.y + c.foot[1], c.foot[2]))), full = new THREE.Box3();
+      for (const c of members) for (const t of [0, 1]) {
+        const p = new THREE.Vector3(c.foot[0] + c.lean[0] * t, e.root.position.y + c.foot[1] + c.height * t, c.foot[2] + c.lean[1] * t);
+        const r = new THREE.Vector3(c.radius * 1.2, 0, c.radius * 1.2); full.expandByPoint(p.clone().sub(r)); full.expandByPoint(p.clone().add(r));
+      }
+      fullArea += (full.max.x - full.min.x) * (full.max.z - full.min.z);
+      for (const axis of ['x', 'z']) for (const side of [-1, 1]) {
+        const center = bounds.getCenter(new THREE.Vector3()), start = center.clone(); start.y = bounds.min.y;
+        start[axis] = (side > 0 ? bounds.max[axis] : bounds.min[axis]) + side * .5;
+        // 北侧靠近低花坛, 从实际支撑面开始, 避免将玩家脚底直接放进花坛.
+        start.y = Math.max(start.y, ...solid.filter(s => s.root !== e.root && s.box.max.y <= start.y + STEP_HEIGHT && footprint(start, player.body.radius, s.box)).map(s => s.box.max.y));
+        player.position.copy(start); player.body.vy = 0; player.body.grounded = true; player.debug = false;
+        const distance = bounds.max[axis] - bounds.min[axis] + 1, moved = move(player, axis === 'x' ? -side * distance : 0, axis === 'z' ? -side * distance : 0);
+        stops.push(moved > .08 && side * (player.position[axis] - center[axis]) > .3 && group.some(s => footprint(player.position, .34, s.box)));
+        stopDetails.push({ cluster: i / 3, axis, side, moved, position: player.position.toArray(), center: center.toArray(), touching: group.some(s => footprint(player.position, .34, s.box)) });
+      }
+      for (const x of [full.min.x + .12, full.max.x - .12]) for (const z of [full.min.z + .12, full.max.z - .12]) {
+        const p = new THREE.Vector3(x, bounds.min.y, z);
+        if (blockedAt(p, player.body.radius, player.body.height, [])) continue;
+        player.position.copy(p); const moved = move(player, .06, 0);
+        if (moved > .055) openCorners++;
+      }
+    }
+    const covered = culms.every(c => [0, 2.8 / c.height].every(t => boxes.some(({ box }) => box.clone().expandByScalar(.001).containsPoint(new THREE.Vector3(c.foot[0] + c.lean[0] * t, e.root.position.y + c.foot[1] + c.height * t, c.foot[2] + c.lean[1] * t)))));
+    // 共用实体盒不参与射击, 簇内空隙仍可透过; 命中点继续贴合真实竹竿.
+    let gaps = 0;
+    for (const { box } of boxes) {
+      const center = box.getCenter(new THREE.Vector3()); center.y = box.min.y + .6;
+      for (let i = 0; i < 20; i++) {
+        const p = center.clone(); p.x += (i % 5 - 2) * .15; p.z += (Math.floor(i / 5) - 1.5) * .15;
+        const clear = culms.every(c => { const t = (p.y - e.root.position.y - c.foot[1]) / c.height; return Math.hypot(p.x - c.foot[0] - c.lean[0] * t, p.z - c.foot[2] - c.lean[1] * t) > .2; });
+        if (!clear) continue;
+        ray.set(p, new THREE.Vector3(1, 0, 0)); ray.near = .001; ray.far = .08;
+        if (!ray.intersectObject(e.root, true).length) gaps++;
+      }
+    }
+    const original = { position: e.root.position.clone(), quaternion: e.root.quaternion.clone(), scale: e.root.scale.clone() }, transformed = [];
+    try {
+      e.root.position.set(2, 3, -4); e.root.rotation.set(.12, .43, -.08); e.root.scale.set(1.3, .8, .9); e.root.updateWorldMatrix(true, true);
+      const mesh = e.root.children[0]; ray.near = .001; ray.far = 2;
+      for (const i of [0, 16, 38, 72]) for (const angle of [0, 1.1, 2.4]) {
+        const c = culms[i], t = 1 / c.height, center = new THREE.Vector3(c.foot[0] + c.lean[0] * t, c.foot[1] + 1, c.foot[2] + c.lean[1] * t);
+        const from = e.root.localToWorld(center.clone().add(new THREE.Vector3(Math.cos(angle) * .3, 0, Math.sin(angle) * .3))), to = e.root.localToWorld(center.clone());
+        ray.set(from, to.sub(from).normalize()); const actual = [], expected = [];
+        mesh.raycast(ray, actual); THREE.Mesh.prototype.raycast.call(mesh, ray, expected);
+        actual.sort((a, b) => a.distance - b.distance); expected.sort((a, b) => a.distance - b.distance);
+        transformed.push(!!actual[0] && !!expected[0] && actual[0].point.distanceTo(expected[0].point) < .00001 && actual[0].faceIndex === expected[0].faceIndex && actual[0].face.normal.distanceTo(expected[0].face.normal) < .00001);
+      }
+    } finally {
+      e.root.position.copy(original.position); e.root.quaternion.copy(original.quaternion); e.root.scale.copy(original.scale); e.root.updateWorldMatrix(true, true);
+    }
+    return { count: culms.length, boxes: boxes.length, covered, matched: offsets.every(d => d > .02 && d < .08), faceMatches, stops, stopDetails, gaps, transformed, areaReduction: 1 - area / fullArea, openCorners, heights: boxes.map(s => s.box.max.y - s.box.min.y) };
+  });
+  assert.equal(bamboo.count, 73); assert.equal(bamboo.boxes, 15); assert(bamboo.covered && bamboo.matched, '5 簇分带实体盒应覆盖人物可接触的竿身, 射击仍精确命中竿面');
+  assert(bamboo.stops.length === 20 && bamboo.stops.every(Boolean), `竹簇四向应阻挡实际移动: ${JSON.stringify(bamboo.stopDetails.filter((_, i) => !bamboo.stops[i]))}`);
+  assert(bamboo.areaReduction > .25 && bamboo.openCorners >= 5, '碰撞占地应收紧至少四分之一, 原矩形角落应能正常移动');
+  assert(bamboo.heights.every(h => Math.abs(h - 3) < .001), '竹梢不应扩张下部实体范围, 3 米竿身仍覆盖正常跳跃时的身体');
+  assert(bamboo.faceMatches.length === 73 && bamboo.faceMatches.every(Boolean), '竹竿命中的对象/面编号应指向可见网格, 保持弹痕法线正确');
+  assert(bamboo.gaps > 10, '共用实体盒不能成为簇内空隙的虚假射击遮挡');
+  assert(bamboo.transformed.every(Boolean), '旋转/非均匀缩放后, 竹竿命中点/面编号/法线应与原生射线一致');
   const safety = await page.evaluate(() => {
     player.position.set(46, 2.4, 130); player.body.grounded = true; player.body.vy = 0;
     for (let i = 0; i < 120; i++) { move(player, -.1, 0); fall(player.body, 1 / 60); }
@@ -96,5 +194,5 @@ try {
   });
   for (const key of ['lakeStopped', 'deckStopped', 'matching', 'valid', 'treesSupported', 'fernsSupported', 'basinAnimation', 'bankClear']) assert(safety[key], key);
   assert.equal(safety.nonfinite, 0); assert.deepEqual(safety.failures, []); assert.deepEqual(errors, []); assert.deepEqual(network, []);
-  console.log('PASS 公园离线接入, 6 条园路, 石桥, 缓丘, 观景台, 湖岸/沿墙环路, 参道台阶, 枯山水观景铺地/园墙入口, 手水舍绕行与动画, 岸草避水/桥口, 湖岸阻挡, 地形/植被支撑, 网格属性有限值.');
+  console.log('PASS 公园离线接入, 6 条园路, 石桥中间/两侧双向通行与踏面支撑一致, 缓丘, 观景台, 湖岸/沿墙环路, 参道台阶, 枯山水观景铺地/园墙入口, 手水舍绕行与动画, 岸草避水/桥口, 湖岸阻挡, 73 根竹竿精确射击/面编号与 5 簇分带碰撞收紧/四向阻挡/角落通行/空隙可透过, 地形/植被支撑, 网格属性有限值.');
 } finally { await browser.close(); }

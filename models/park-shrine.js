@@ -13,10 +13,26 @@ FPS.models.parkShrine = T => {
     }
     g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2));
     const c = new T.Color(color), colors = [];
-    for (let i = 0; i < g.attributes.position.count; i++) colors.push(c.r, c.g, c.b);
+    const center = g.boundingBox.getCenter(new T.Vector3()), piece = batch === 0 ? .96 + .04 * Math.sin(center.x * 13 + center.y * 7 + center.z * 3) : 1;
+    for (let i = 0; i < g.attributes.position.count; i++) {
+      const weather = batch === 0 ? .9 + .1 * Math.min(1, Math.max(0, (p.getY(i) - .55) / .8)) : 1;
+      const underside = batch === 0 && n.getY(i) < -.5 ? .83 : 1;
+      colors.push(c.r * piece * weather * underside, c.g * piece * weather * underside, c.b * piece * weather * underside);
+    }
     g.setAttribute('color', new T.Float32BufferAttribute(colors, 3)); parts[batch].push(g);
   }
-  const box = (s, p, c) => add(new T.BoxGeometry(...s).translate(...p), c), wood = 0x64503b, dark = 0x40392e;
+  function box(s, p, c, angle = 0) {
+    let g;
+    if (Math.min(...s) > .18) {
+      const b = .012, shape = new T.Shape();
+      shape.moveTo(-s[0] / 2 + b, -s[1] / 2 + b); shape.lineTo(s[0] / 2 - b, -s[1] / 2 + b);
+      shape.lineTo(s[0] / 2 - b, s[1] / 2 - b); shape.lineTo(-s[0] / 2 + b, s[1] / 2 - b); shape.closePath();
+      // 倒角向盒体内部收, 外轮廓和通行碰撞沿用原尺寸; 门格细条保留原来的深度层次.
+      g = new T.ExtrudeGeometry(shape, { depth: s[2] - b * 2, bevelEnabled: true, bevelSize: b, bevelThickness: b, bevelSegments: 2 }).translate(0, 0, -s[2] / 2 + b);
+    } else g = new T.BoxGeometry(...s);
+    add(g.rotateZ(angle).translate(...p), c);
+  }
+  const wood = 0x756044, dark = 0x40392e;
   box([10.8, .48, 9], [0, .24, -.6], 0x96998c);
   for (let i = 0; i < 4; i++) box([3.4, .15 * (i + 1), .45], [0, .075 * (i + 1), -6.675 + i * .45], 0xb1b4a6);
   for (let i = 0; i < 27; i++) box([.388, .12, 8.9], [-5.2 + i * .4, .54, -.6], i % 3 ? 0x887256 : 0x7b654e);
@@ -32,6 +48,7 @@ FPS.models.parkShrine = T => {
       box([.28, 4.4, .28], [side * 4.55, 2.8, z], wood);
       box([.44, .22, .44], [side * 4.55, .71, z], 0x85887d);
       box([.62, .15, .48], [side * 4.55, 4.81, z], wood);
+      box([.14, 1.1, .15], [side * 4.24, 4.29, z], wood, side * .59);
     }
     box([.18, .15, 8.5], [side * 4.55, 4.94, -.7], dark);
     for (const z of [-1.7, .25, 2.2]) {
@@ -84,19 +101,26 @@ FPS.models.parkShrine = T => {
     for (const y of [.79, 3.72]) box([.1, .11, 6], [side * 4.45, y, .1], dark);
   }
   function surfaceMap(kind) {
-    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
-    const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(256, 256); let seed = 881;
-    for (let y = 0; y < 256; y++) for (let x = 0; x < 256; x++) {
+    const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 1024;
+    const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(512, 1024); let seed = 881;
+    for (let y = 0; y < 1024; y++) for (let x = 0; x < 512; x++) {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       const noise = (seed / 4294967296 - .5) * (kind === 0 ? 7 : 17);
       let v = 243 + noise;
-      if (kind === 0) v += 9 * Math.sin(x * .33 + Math.sin(y * .025) * 1.4) * Math.sin(x * .073 + Math.sin(y * .04));
-      if (kind === 2) { v -= 13 + 6 * Math.sin(x * Math.PI / 32); if (y % 64 < 3 || x % 64 < 2) v -= 35; }
-      if (kind === 3) v = 250 + noise * .2;
-      pixels.data.set([v, v, v - (kind === 0 ? 4 : 0), 255], (y * 256 + x) * 4);
+      if (kind === 0) {
+        const curve = Math.sin(y * Math.PI / 512) * 7 + Math.sin(y * Math.PI / 128) * 2, fiber = x + curve;
+        const knot = Math.sin(Math.hypot((x - 208) * .8, (y - 470) * .24) * .29) * Math.exp(-((x - 208) ** 2 / 1800 + (y - 470) ** 2 / 18000));
+        v = 231 + 12 * Math.sin(fiber * Math.PI / 16) + 5 * Math.sin(fiber * Math.PI / 4) + 11 * knot + noise;
+      }
+      if (kind === 2) {
+        const u = (x % 64) / 64, seam = y % 128 < 3 || x % 64 < 2;
+        v = 222 + 12 * Math.sin(u * Math.PI) + 5 * Math.sin(y * Math.PI / 512) + noise - (seam ? 28 : 0);
+      }
+      if (kind === 3) v = 243 + 5 * Math.sin(x * Math.PI / 128 + Math.sin(y * Math.PI / 256)) * Math.sin(y * Math.PI / 512) + noise * .25;
+      pixels.data.set([v, v, v - (kind === 0 ? 4 : 0), 255], (y * 512 + x) * 4);
     }
     ctx.putImageData(pixels, 0, 0); const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
-    map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4; return map;
+    map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 8; return map;
   }
   for (const [i, batch] of parts.entries()) if (batch.length) {
     const map = i < 4 ? surfaceMap(i) : undefined;

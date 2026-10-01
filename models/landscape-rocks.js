@@ -69,8 +69,8 @@ FPS.models.landscapeRocks = (T, o = {}) => {
     }
     for (let i = 0; i < p.count; i++) {
       const face = new T.Vector3().fromBufferAttribute(normal, i), sum = new T.Vector3();
-      for (const n of sums.get(key(i))) if (!o.weathered || face.dot(n) > .92) sum.add(n);
-      face.lerp(sum.normalize(), o.weathered ? .78 : .82).normalize(); normal.setXYZ(i, face.x, face.y, face.z);
+      for (const n of sums.get(key(i))) if (!o.weathered || face.dot(n) > .86) sum.add(n);
+      face.lerp(sum.normalize(), o.weathered ? .9 : .82).normalize(); normal.setXYZ(i, face.x, face.y, face.z);
     }
     parts.push(g);
   }
@@ -86,6 +86,18 @@ FPS.models.landscapeRocks = (T, o = {}) => {
     ctx.putImageData(pixels, 0, 0); const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
     map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4;
     const mesh = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: o.weathered ? .009 : .014, vertexColors: true, roughness: .98 }));
+    if (o.weathered) {
+      // 三轴取样跨越石块断面, 细粒不在每个三角形的投影方向上留下接缝.
+      mesh.material.customProgramCacheKey = () => 'weathered-rock-triplanar-v1';
+      mesh.material.onBeforeCompile = shader => {
+        shader.vertexShader = 'varying vec3 rockPosition,rockNormal;\n' + shader.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nrockPosition=position;rockNormal=normal;');
+        shader.fragmentShader = 'varying vec3 rockPosition,rockNormal;\n' + shader.fragmentShader
+          .replace('#include <map_fragment>', `vec3 weights=pow(abs(normalize(rockNormal)),vec3(4.)); weights/=max(dot(weights,vec3(1.)),.001);
+            vec3 rockGrain=texture2D(map,rockPosition.yz*2.).rgb*weights.x+texture2D(map,rockPosition.xz*2.).rgb*weights.y+texture2D(map,rockPosition.xy*2.).rgb*weights.z;
+            diffuseColor.rgb*=rockGrain;`)
+          .replace('#include <normal_fragment_maps>', 'float rockHeight=dot(rockGrain,vec3(.333333))*bumpScale;normal=perturbNormalArb(-vViewPosition,normal,vec2(dFdx(rockHeight),dFdy(rockHeight)),faceDirection);');
+      };
+    }
     mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); parts.forEach(g => g.dispose());
   }
   return { root };

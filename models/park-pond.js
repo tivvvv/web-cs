@@ -36,22 +36,25 @@ FPS.models.parkPond = (T, o = {}) => {
   const waterGeometry = new T.BufferGeometry(); waterGeometry.setAttribute('position', new T.Float32BufferAttribute(vertices, 3)); waterGeometry.setIndex(indices); waterGeometry.computeVertexNormals();
   const impacts = new Float32Array(6 * 4); for (let i = 0; i < 6; i++) impacts[i * 4 + 2] = -100;
   let impactSlot = 0; const hitLocal = new T.Vector3();
-  // 反射辅助面不加入场景, 只借用上游的裁剪平面与相机算法.
-  const mirror = new T.Reflector(new T.PlaneGeometry(1,1), { textureWidth: 768, textureHeight: 512, clipBias: .003, multisample: 2 });
+  // 反射辅助面不加入场景; 水面已隐藏, 裁剪仅留微小偏移, 避免近岸倒影被过度截断.
+  const mirror = new T.Reflector(new T.PlaneGeometry(1,1), { textureWidth: 768, textureHeight: 512, clipBias: .00005, multisample: 4 });
   mirror.rotation.x=-Math.PI/2; mirror.position.y=waterY; mirror.updateMatrix();
   const center=new T.Vector3(), toward=new T.Vector3(), frustum=new T.Frustum(), projection=new T.Matrix4(), bounds=new T.Box3();
+  // 倒影生成 mipmap, 斜视时过滤缩小后的枝叶/栏杆, 不采样跳变的高频亮暗边.
+  const reflectionTarget = mirror.getRenderTarget(); reflectionTarget.texture.generateMipmaps = true; reflectionTarget.texture.minFilter = T.LinearMipmapLinearFilter;
+  const reflectedView = new T.Matrix4(), reflectedProjection = new T.Matrix4();
   waterGeometry.computeBoundingBox(); let lastReflection=-Infinity;
-  const waterUniforms = { lakeReflection: { value: mirror.getRenderTarget().texture }, lakeReflectionMatrix: mirror.material.uniforms.textureMatrix, lakeReflectionReady: { value: 0 }, lakeHits: { value: impacts }, lakeTime: { value: 0 }, lakeShore: { value: shoreMap }, lakeSize: { value: new T.Vector2(w, d) } };
+  const waterUniforms = { lakeReflection: { value: reflectionTarget.texture }, lakeReflectionSize: { value: new T.Vector2(reflectionTarget.width, reflectionTarget.height) }, lakeReflectionMatrix: mirror.material.uniforms.textureMatrix, lakeReflectionReady: { value: 0 }, lakeHits: { value: impacts }, lakeTime: { value: 0 }, lakeShore: { value: shoreMap }, lakeSize: { value: new T.Vector2(w, d) } };
   // 复用标准材质的灯光/阴影绑定和顶点阶段, 片元只算湖水, 不执行额外 PBR 光照.
   const material = new T.MeshStandardMaterial({ roughness: .3, transparent: true });
-  material.customProgramCacheKey = () => 'park-lake-water-v3';
+  material.customProgramCacheKey = () => 'park-lake-water-v4';
   material.onBeforeCompile = shader => {
     Object.assign(shader.uniforms, waterUniforms);
     shader.vertexShader = 'uniform mat4 lakeReflectionMatrix; varying vec4 lakeReflectCoord; varying vec3 lakeWorld; varying vec2 lakeLocal;\n' + shader.vertexShader.replace(
       '#include <worldpos_vertex>', '#include <worldpos_vertex>\n lakeWorld=(modelMatrix*vec4(transformed,1.)).xyz; lakeLocal=transformed.xz; lakeReflectCoord=lakeReflectionMatrix*vec4(transformed.x,-transformed.z,0.,1.);'
     );
     shader.fragmentShader = `
-      uniform sampler2D lakeReflection; uniform float lakeReflectionReady; varying vec4 lakeReflectCoord;
+      uniform sampler2D lakeReflection; uniform vec2 lakeReflectionSize; uniform float lakeReflectionReady; varying vec4 lakeReflectCoord;
       uniform float lakeTime; uniform vec4 lakeHits[6]; uniform sampler2D lakeShore; uniform vec2 lakeSize;
       varying vec3 lakeWorld; varying vec2 lakeLocal;
       #include <common>
@@ -94,10 +97,13 @@ FPS.models.parkPond = (T, o = {}) => {
         water*=mix(.78,1.,smoothstep(.015,.24,bankDistance));
         vec3 reflected=reflect(-view,n);
         vec3 sky=mix(vec3(.46,.63,.69),vec3(.13,.34,.51),smoothstep(0.,.9,reflected.y));
-        vec2 reflectedUV=lakeReflectCoord.xy/lakeReflectCoord.w+slope*.035;
+        vec2 reflectedUV=lakeReflectCoord.xy/max(lakeReflectCoord.w,.0001)+slope*.035;
         float reflectionEdge=smoothstep(0.,.035,min(min(reflectedUV.x,reflectedUV.y),min(1.-reflectedUV.x,1.-reflectedUV.y)));
-        vec3 landscape=texture2D(lakeReflection,clamp(reflectedUV,.001,.999)).rgb;
-        sky=mix(sky,landscape,lakeReflectionReady*reflectionEdge);
+        // 水面有微小粗糙度, 至少过滤相邻六像素; 远景按投影覆盖选择更低的 mip.
+        vec2 dx=dFdx(reflectedUV)*lakeReflectionSize, dy=dFdy(reflectedUV)*lakeReflectionSize;
+        float reflectionMip=max(2.5,.5*log2(max(max(dot(dx,dx),dot(dy,dy)),1.)));
+        vec3 landscape=textureLod(lakeReflection,clamp(reflectedUV,.001,.999),reflectionMip).rgb;
+        sky=mix(sky,landscape,lakeReflectionReady*reflectionEdge*step(.0001,lakeReflectCoord.w));
         float shadow=getShadowMask();
         vec3 color=mix(water*(.56+.44*shadow),sky*(.78+.22*shadow),fresnel);
         #if NUM_DIR_LIGHTS > 0
@@ -117,19 +123,27 @@ FPS.models.parkPond = (T, o = {}) => {
     root,
     prepare(renderer) { if (renderer.extensions.has('EXT_color_buffer_float')) renderer.initRenderTarget(mirror.getRenderTarget()); },
     beforeRender(renderer, scene, camera) {
+      waterUniforms.lakeReflectionReady.value = 0;
       if (!root.visible || !renderer.extensions.has('EXT_color_buffer_float')) return;
-      root.updateWorldMatrix(true,false); center.setFromMatrixPosition(root.matrixWorld); center.y+=waterY;
+      root.updateWorldMatrix(true,false); center.set(0,waterY,0).applyMatrix4(root.matrixWorld);
       toward.copy(center).sub(camera.position);
-      if (toward.length()>75 || camera.position.y<=center.y) return;
+      const distance = toward.length();
+      if (distance>=75 || camera.position.y<=center.y) return;
       frustum.setFromProjectionMatrix(projection.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse));
       bounds.copy(waterGeometry.boundingBox).applyMatrix4(root.matrixWorld);
       if (!frustum.intersectsBox(bounds)) return;
-      const stamp=performance.now(); if (stamp-lastReflection<1000/30) return;
+      const fade = Math.max(0, Math.min(1, (75 - distance) / 15));
+      waterUniforms.lakeReflectionReady.value = Number.isFinite(lastReflection) ? fade * fade * (3 - 2 * fade) : 0;
+      // 相机移动/转向时同步倒影; 只有静止视角限频, 不把旧相机画面分段贴到新视角.
+      const stamp=performance.now(), moved = !reflectedView.equals(camera.matrixWorld) || !reflectedProjection.equals(camera.projectionMatrix);
+      if (!moved && stamp-lastReflection<1000/30) return;
       mirror.matrixWorld.multiplyMatrices(root.matrixWorld,mirror.matrix);
       const target=renderer.getRenderTarget(), xr=renderer.xr.enabled, shadows=renderer.shadowMap.autoUpdate;
       const visible=water.visible;
       try {
-        water.visible=false; mirror.onBeforeRender(renderer,scene,camera); waterUniforms.lakeReflectionReady.value=1; lastReflection=stamp;
+        water.visible=false; mirror.onBeforeRender(renderer,scene,camera); lastReflection=stamp;
+        reflectedView.copy(camera.matrixWorld); reflectedProjection.copy(camera.projectionMatrix);
+        waterUniforms.lakeReflectionReady.value=fade * fade * (3 - 2 * fade);
       } finally {
         water.visible=visible; renderer.xr.enabled=xr; renderer.shadowMap.autoUpdate=shadows; renderer.setRenderTarget(target);
       }

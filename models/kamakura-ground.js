@@ -17,6 +17,34 @@ FPS.models.kamakuraGround = T => {
     return new T.MeshStandardMaterial({ map, roughness: .94 });
   }
   const asphalt = surface([92, 96, 99], 34, [5, 8]);
+  // 沥青的大尺度色差按整个街区烘焙, 轮迹沿道路延伸, 路肩积尘; 近景颗粒独立重复.
+  const roadCanvas = document.createElement('canvas'); roadCanvas.width = roadCanvas.height = 1024;
+  const rc = roadCanvas.getContext('2d'), roadPixels = rc.createImageData(1024, 1024);
+  for (let y = 0; y < 1024; y++) for (let x = 0; x < 1024; x++) {
+    const wx = x / 1024 * 100 - 50, wz = 58 - y / 1024 * 76;
+    const lane = wz > -7 ? wx : wz + 11, half = wz > -7 ? 3.8 : 4;
+    const verge = Math.pow(Math.min(1, Math.abs(lane) / half), 8);
+    const tracks = Math.exp(-(((Math.abs(lane) - 1.25) / .3) ** 2));
+    const cloud = Math.sin(wx * .52 + Math.sin(wz * .21)) * Math.sin(wz * .31 - wx * .13);
+    const shade = cloud * 5 + verge * 17 - tracks * 9 + (random() - .5) * 7;
+    roadPixels.data.set([90 + shade, 95 + shade, 95 + shade - verge * 5, 255], (y * 1024 + x) * 4);
+  }
+  rc.putImageData(roadPixels, 0, 0); rc.setTransform(1024 / 100, 0, 0, -1024 / 76, 512, 58 * 1024 / 76);
+  // 修补块与裂缝进入材质, 不用贴在路面上方的细线制造浮动/闪烁.
+  for (const [x, z, w, d] of [[1.1, 8, 1.2, 2.7], [-1.6, 17.5, 2.1, 1.7], [2, 39, 1.4, 3.8], [-28, -10, 2.8, 2.1]]) {
+    rc.fillStyle = '#545d5c66'; rc.fillRect(x - w / 2, z - d / 2, w, d);
+    rc.strokeStyle = '#343d3938'; rc.lineWidth = .025; rc.strokeRect(x - w / 2, z - d / 2, w, d);
+  }
+  rc.strokeStyle = '#39444088'; rc.lineWidth = .018;
+  for (let i = 0; i < 28; i++) {
+    const x = (random() - .5) * 6.4, z = 5 + random() * 48;
+    rc.beginPath(); rc.moveTo(x, z); rc.lineTo(x + .23, z + .32); rc.lineTo(x + .14, z + .56); rc.lineTo(x + .5, z + .84); rc.stroke();
+  }
+  const roadMap = new T.CanvasTexture(roadCanvas); roadMap.colorSpace = T.SRGBColorSpace; roadMap.anisotropy = 8;
+  const detail = asphalt.map; detail.repeat.set(100 / 1.3, 76 / 1.3);
+  asphalt.map = roadMap; asphalt.bumpMap = detail; asphalt.bumpScale = .004;
+  asphalt.customProgramCacheKey = () => 'coastal-road-grain-v1';
+  asphalt.onBeforeCompile = shader => { shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n diffuseColor.rgb *= .75 + .36 * texture2D(bumpMap,vBumpMapUv).r;'); };
   const concrete = surface([165, 160, 144], 26, [8, 2]);
   const crossing = concrete.clone(); crossing.color.setHex(0xc8ccc9);
   const ballast = surface([99, 94, 88], 64, [25, 2]);
@@ -25,7 +53,12 @@ FPS.models.kamakuraGround = T => {
   const rust = new T.MeshStandardMaterial({ color: 0x725448, roughness: .87, metalness: .25 });
   const dark = new T.MeshStandardMaterial({ color: 0x333b3c, roughness: .85 });
   function box(size, pos, mat) {
-    const mesh = new T.Mesh(new T.BoxGeometry(...size), mat); mesh.position.set(...pos);
+    const g = new T.BoxGeometry(...size);
+    if (mat === asphalt) {
+      const p = g.attributes.position, uv = g.attributes.uv;
+      for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getX(i) + pos[0] + 50) / 100, (p.getZ(i) + pos[2] + 18) / 76);
+    }
+    const mesh = new T.Mesh(g, mat); mesh.position.set(...pos);
     mesh.receiveShadow = true; root.add(mesh); return mesh;
   }
   box([100, .6, 76], [0, -.3, 20], concrete);
@@ -75,7 +108,7 @@ FPS.models.kamakuraGround = T => {
   for (let z = 5; z < 56; z += 1.2) for (const x of [-3.9, 3.9]) {
     box([.35, .085, 1.16], [x, .06, z], concrete);
   }
-  // 排水沟盖, 检修井盖与细裂纹使用真实几何轮廓.
+  // 排水沟盖与检修井盖使用实体几何, 裂缝由路面材质负责.
   for (let z = 7; z < 53; z += 5) {
     box([.32, .015, .66], [-3.67, .065, z], dark);
     for (let j = 0; j < 7; j++) box([.31, .018, .027], [-3.67, .076, z - .27 + j * .09], steel);
@@ -83,13 +116,6 @@ FPS.models.kamakuraGround = T => {
   const cover = new T.Mesh(new T.CylinderGeometry(.42, .42, .017, 40), dark);
   cover.position.set(.8, .049, 16); root.add(cover);
   for (let i = -3; i <= 3; i++) box([.52, .014, .022], [.8, .063, 16 + i * .085], steel);
-  const crackMat = new T.LineBasicMaterial({ color: 0x525556 }), crackPoints = [];
-  for (let i = 0; i < 36; i++) {
-    const x = (random() - .5) * 6.4, z = 4 + random() * 49, points = [];
-    for (let j = 0; j < 5; j++) points.push(new T.Vector3(x + j * .12 + random() * .2, .043, z + j * .17 + random() * .1));
-    for (let j = 1; j < points.length; j++) crackPoints.push(points[j - 1], points[j]);
-  }
-  root.add(new T.LineSegments(new T.BufferGeometry().setFromPoints(crackPoints), crackMat));
   // 统一合并静态地面构件, 道砟与轨枕继续保留实例化绘制.
   const groups = new Map();
   for (const mesh of [...root.children]) if (mesh.isMesh && !mesh.isInstancedMesh) {
@@ -103,5 +129,7 @@ FPS.models.kamakuraGround = T => {
     const mesh = new T.Mesh(T.mergeGeometries(geometries), mat); mesh.receiveShadow = true; root.add(mesh);
     geometries.forEach(g => g.dispose());
   }
-  return { root };
+  return { root, onHit(hit) {
+    if (hit.object.material === ballast) return { bulletmark: false, surface: 'soil' };
+  } };
 };

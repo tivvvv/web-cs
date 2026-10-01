@@ -20,5 +20,6 @@ FPS.models.coastalBeach = (T, o = {}) => {
   ctx.putImageData(pixels, 0, 0); const map = new T.CanvasTexture(canvas);
   map.colorSpace = T.SRGBColorSpace; map.wrapS = map.wrapT = T.RepeatWrapping;
   const mesh = new T.Mesh(g, new T.MeshStandardMaterial({ map, vertexColors: true, roughness: 1 }));
-  mesh.receiveShadow = true; root.add(mesh); return { root };
+  mesh.receiveShadow = true; root.add(mesh);
+  return { root, onHit() { return { bulletmark: false, surface: 'soil' }; } };
 };

@@ -2,7 +2,8 @@
 FPS.models.enodenTrain = (T, options = {}) => {
   const root = new T.Group(), parts = new Map();
   const material = (color, roughness = .55, metalness = .15) => new T.MeshStandardMaterial({ color, roughness, metalness });
-  const green = material(0x16796e, .34, .38), cream = material(0xe4ddbc, .48, .24);
+  const green = new T.MeshPhysicalMaterial({ color: 0x16796e, roughness: .34, metalness: .08, clearcoat: .7, clearcoatRoughness: .22, vertexColors: true });
+  const cream = new T.MeshPhysicalMaterial({ color: 0xe4ddbc, roughness: .42, metalness: .06, clearcoat: .6, clearcoatRoughness: .26, vertexColors: true });
   // 漆面粗糙度和细微凹凸由噪声生成, 保留金属涂装的高光而非塑料平涂.
   const enamel = document.createElement('canvas'); enamel.width = enamel.height = 128;
   const enamelContext = enamel.getContext('2d'), enamelPixels = enamelContext.createImageData(128, 128);
@@ -27,7 +28,16 @@ FPS.models.enodenTrain = (T, options = {}) => {
     if (!parts.has(mat)) parts.set(mat, []);
     parts.get(mat).push(geometry.applyMatrix4(mesh.matrix)); return mesh;
   }
-  const box = (s, p, m, r) => add(new T.BoxGeometry(...s), m, p, r);
+  function box(s, p, m, r) {
+    let g;
+    if (m === green || m === cream) {
+      const b = Math.min(.009, ...s.map(v => v / 10)), shape = new T.Shape();
+      shape.moveTo(-s[0] / 2 + b, -s[1] / 2 + b); shape.lineTo(s[0] / 2 - b, -s[1] / 2 + b);
+      shape.lineTo(s[0] / 2 - b, s[1] / 2 - b); shape.lineTo(-s[0] / 2 + b, s[1] / 2 - b); shape.closePath();
+      g = new T.ExtrudeGeometry(shape, { depth: s[2] - b * 2, bevelEnabled: true, bevelSize: b, bevelThickness: b, bevelSegments: 1 }).translate(0, 0, -s[2] / 2 + b);
+    } else g = new T.BoxGeometry(...s);
+    return add(g, m, p, r);
+  }
   function rod(a, b, radius, mat = metal) {
     const p = new T.Vector3(...a), q = new T.Vector3(...b), d = q.clone().sub(p);
     const mesh = new T.Mesh(new T.CylinderGeometry(radius, radius, d.length(), 10), mat);
@@ -153,8 +163,19 @@ FPS.models.enodenTrain = (T, options = {}) => {
   if (cars === 2) for (let i = 0; i < 7; i++) box([.06, 2.15, 1.55], [-8.03 - i * .09, 2.12, 0], rubber);
   // 静态构件按材质合并, 让螺栓, 悬挂与窗框细节不产生数百次绘制.
   for (const [mat, geometries] of parts) {
-    const geometry = T.mergeGeometries(geometries.map(g => g.index ? g.toNonIndexed() : g), false), mesh = new T.Mesh(geometry, mat);
-    mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); geometries.forEach(g => g.dispose());
+    const flat = geometries.map(g => g.index ? g.toNonIndexed() : g);
+    if (mat === green || mat === cream) for (const g of flat) {
+      const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv, colors = [];
+      for (let i = 0; i < p.count; i++) {
+        const grime = .88 + .12 * Math.min(1, Math.max(0, (p.getY(i) - 1.08) / .9));
+        colors.push(grime, grime, grime);
+        uv.setXY(i, (Math.abs(n.getX(i)) > .5 ? p.getZ(i) : p.getX(i)) * .7, p.getY(i) * .7);
+      }
+      g.setAttribute('color', new T.Float32BufferAttribute(colors, 3));
+    }
+    const geometry = T.mergeGeometries(flat, false), mesh = new T.Mesh(geometry, mat);
+    mesh.castShadow = mesh.receiveShadow = true; root.add(mesh);
+    new Set([...flat, ...geometries]).forEach(g => g.dispose());
   }
   destination.geo.dispose(); logo.geo.dispose();
   return { root };
