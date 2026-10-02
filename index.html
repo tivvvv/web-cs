@@ -66,6 +66,7 @@ body[data-playing="true"] .menu,body[data-playing="true"] .scene-label,body[data
 .ammo-number small{font:19px monospace;color:#ced9c7}
 .weapon-line{font:10px monospace;letter-spacing:2px;margin-top:8px}
 .hud-help{position:fixed;bottom:35px;left:50%;transform:translateX(-50%);font-size:10px;color:#dae3d1;letter-spacing:1px;text-shadow:0 1px 3px #000}
+.climb-help{position:fixed;bottom:60px;left:50%;transform:translateX(-50%);font-size:11px;color:#e5d49d;white-space:nowrap;text-shadow:0 1px 3px #000}
 .crosshair{position:fixed;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%);filter:drop-shadow(0 0 2px #23392c)}
 .crosshair:before,.crosshair:after{content:"";position:absolute;background:#f4f0d9}
 .crosshair:before{width:2px;height:16px;left:11px;top:4px}
@@ -212,6 +213,7 @@ body[data-freeplay="true"] .mission,body[data-freeplay="true"] .radar{display:no
 <div class="weapon-line">5.56 MM · AUTOMATIC</div>
 </div>
 <div class="hud-help">SPACE 跳跃  SHIFT 奔跑  R 换弹  B 调试  U 敌人开关  ESC 暂停</div>
+<div class="climb-help" id="climb-help" hidden>竖梯 · W 上爬 / S 下爬 / SPACE 跳离</div>
 <div class="crosshair" id="crosshair">
 </div>
 </div>
@@ -252,7 +254,7 @@ function load(path) {
     script.onerror = () => { report(path, '文件不存在或无法加载'); finish(false); }; document.head.append(script);
   });
 }
-let T, renderer, scene, camera, layout, weapon, api, renderEffect, solid = [], actors = [], entries = [], effects = [], helpers = [];
+let T, renderer, scene, camera, layout, weapon, api, renderEffect, solid = [], actors = [], entries = [], effects = [], helpers = [], ladders = [];
 let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0;
 let ammo = 30, reloadLeft = 0, cooldown = 0, recoil = 0, recoilSpeed = 0, hurt = 0, hit = 0, toastLeft = 0, walk = 0, fps = 60;
 let firing = false, dragging = false, muted = false, audio, last = 0, hudElapsed = 0;
@@ -339,6 +341,82 @@ function fall(body, dt) {
   p.y = next; body.grounded = landed;
   if (landed || ceiling) body.vy = 0;
   if (p.y < -15) { p.copy(body.spawn || api.spawn); body.vy = 0; body.grounded = false; }
+}
+// 场景声明局部竖梯路线, 加载时一次性转换为世界坐标; 模型不接管玩家控制.
+function buildClimbRoutes(routes, matrix) {
+  if (!Array.isArray(routes)) throw Error('竖梯路线必须为数组');
+  return routes.map(data => {
+    const a = tuple(data.bottom, null), b = tuple(data.top, null), n = tuple(data.normal, [0, 0, 1]), exit = tuple(data.exit, null);
+    if (!a || !b || !exit || !Number.isFinite(data.width) || data.width <= 0) throw Error('竖梯需要起点, 顶点, 出口和正宽度');
+    const localNormal = new T.Vector3(...n); if (Math.abs(localNormal.y) > .0001 || localNormal.lengthSq() < .001) throw Error('竖梯朝向必须为水平非零向量'); localNormal.normalize();
+    const bottom = new T.Vector3(...a).applyMatrix4(matrix), top = new T.Vector3(...b).applyMatrix4(matrix), landing = new T.Vector3(...exit).applyMatrix4(matrix);
+    const normal = localNormal.clone().transformDirection(matrix.clone().invert().transpose());
+    if (top.y <= bottom.y + .4 || Math.hypot(top.x - bottom.x, top.z - bottom.z) > .001 || Math.abs(normal.y) > .001) throw Error('竖梯必须保持竖直');
+    if (Math.abs(landing.y - top.y) > .001 || landing.distanceTo(top) > 2 || landing.clone().sub(top).dot(normal) >= -.1) throw Error('竖梯出口必须位于顶端内侧');
+    const side = new T.Vector3(localNormal.z, 0, -localNormal.x), width = new T.Vector3(...a).addScaledVector(side, data.width).applyMatrix4(matrix).distanceTo(bottom);
+    const offset = new T.Vector3(...a).addScaledVector(localNormal, .43).applyMatrix4(matrix).sub(bottom).dot(normal);
+    // 保留人物半径所需离墙距离, 缩放的小梯子也不会把身体嵌入背墙.
+    const line = bottom.clone().addScaledVector(normal, Math.max(.4, offset));
+    return { bottom, top, exit: landing, normal, side: new T.Vector3(normal.z, 0, -normal.x), line, width };
+  });
+}
+function nearbyLadder() {
+  const p = player.position; let nearest, distance = Infinity;
+  for (const route of ladders) {
+    if (route.owner.disabled || !route.owner.root.parent) continue;
+    const dx = p.x - route.bottom.x, dz = p.z - route.bottom.z, side = dx * route.side.x + dz * route.side.z, front = dx * route.normal.x + dz * route.normal.z;
+    const inWidth = Math.abs(side) < route.width / 2 - .1;
+    const atTop = inWidth && Math.abs(p.y - route.top.y) < .08 && p.distanceTo(route.exit) < .65;
+    const atFace = inWidth && front > .2 && front < .9 && p.y >= route.bottom.y - .08 && p.y <= route.top.y + .025;
+    if (!atTop && !atFace) continue;
+    const gap = atTop ? p.distanceTo(route.exit) : Math.hypot(p.x - route.line.x, p.z - route.line.z);
+    if (gap < distance) { nearest = { route, atTop }; distance = gap; }
+  }
+  return nearest;
+}
+function updateClimbing(dt, x, z, forward, jump) {
+  const body = player.body, p = player.position;
+  body.climbCooldown = Math.max(0, (body.climbCooldown || 0) - dt);
+  body.nearLadder = nearbyLadder();
+  let route = body.ladder;
+  if (route && (route.owner.disabled || !route.owner.root.parent || Math.abs((p.x - route.line.x) * route.side.x + (p.z - route.line.z) * route.side.z) > route.width / 2)) body.ladder = route = null;
+  if (route && (jump || x)) {
+    body.ladder = null; body.climbCooldown = .35; body.grounded = false;
+    if (jump) { move(player, route.normal.x * .3, route.normal.z * .3); body.vy = 4.2; }
+    return false;
+  }
+  if (!route && !jump && !x && !body.climbCooldown && body.nearLadder) {
+    const candidate = body.nearLadder;
+    if (candidate.atTop ? z < 0 : z > 0 && forward.dot(candidate.route.normal) < -.45) {
+      route = body.ladder = candidate.route; body.ladderTop = candidate.atTop;
+    }
+  }
+  if (!route) return false;
+  body.vy = 0; body.grounded = false;
+  const align = target => {
+    const dx = target.x - p.x, dz = target.z - p.z, length = Math.hypot(dx, dz);
+    if (length > .001) { const step = Math.min(length, 2.6 * dt); move(player, dx / length * step, dz / length * step); }
+    return Math.hypot(target.x - p.x, target.z - p.z) < .015;
+  };
+  if (body.ladderTop) {
+    if (!z) return true;
+    if (align(z > 0 ? route.exit : route.line)) {
+      if (z > 0) { body.ladder = null; fall(body, dt); }
+      else body.ladderTop = false;
+    }
+    return true;
+  }
+  if (!align(route.line) || !z) return true;
+  // 小步竖直扫掠保留屋顶, 障碍和动态身体阻挡, 不直接传送到梯顶.
+  const target = clamp(p.y + z * 2.4 * dt, route.bottom.y, route.top.y), steps = Math.max(1, Math.ceil(Math.abs(target - p.y) / .08)), dy = (target - p.y) / steps;
+  const others = physicalBodies(player);
+  for (let i = 0; i < steps; i++) {
+    const y = p.y; p.y += dy;
+    if (blockedAt(p, body.radius, body.height, others)) { p.y = y; break; }
+  }
+  if (z > 0 && p.y >= route.top.y - .001) body.ladderTop = true;
+  else if (z < 0 && p.y <= route.bottom.y + .001) { body.ladder = null; fall(body, dt); }
+  return true;
 }
 // 修复出生点重叠或落地挤入的情况, 分离过程中仍检查墙体和第三个身体.
 function separateBodies() {
@@ -545,6 +623,12 @@ function createInstance(data) {
     }
   }
   if (data.attach && data.attach !== 'camera') throw Error('未知挂载目标');
+  let climbRoutes = [];
+  if (data.traversal?.ladders !== undefined) {
+    if (data.attach || body) throw Error('竖梯必须为静态世界实例');
+    const pose = new T.Object3D(); pose.position.set(...position); pose.rotation.set(...rotation); pose.scale.set(...scale); pose.updateMatrix();
+    climbRoutes = buildClimbRoutes(data.traversal.ladders, pose.matrix);
+  }
   const instance = factory(T, data.options || {}); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
   for (const callback of ['update', 'beforeRender', 'prepare', 'render', 'dispose', 'onHit', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
   if (instance.muzzle !== undefined && !instance.muzzle?.isObject3D) throw Error('枪口必须为 Object3D');
@@ -560,6 +644,7 @@ function createInstance(data) {
   if (instance.bodyWire) { instance.bodyWire.visible = false; scene.add(instance.bodyWire); }
   (data.attach === 'camera' ? camera : scene).add(root); root.updateWorldMatrix(true, true);
   for (const box of boxes) solid.push({ root, box: box.applyMatrix4(root.matrixWorld), id: data.id });
+  for (const route of climbRoutes) { route.owner = instance; ladders.push(route); }
   if (typeof instance.damage === 'function') { root.userData.actor = instance; actors.push(instance); }
   if (instance.onHit) root.userData.hitTarget = instance;
   if (data.attach === 'camera') { weapon = instance; root.traverse(n => n.layers.set(1)); root.visible = false; }
@@ -595,6 +680,7 @@ function toggleDebug() {
     if (!supported || blockedAt(p, player.body.radius, player.body.height, physicalBodies(player))) p.copy(api.spawn);
   }
   player.debug = !player.debug; player.body.vy = 0; player.body.grounded = false; firing = false;
+  player.body.ladder = null; player.body.nearLadder = null; player.body.climbCooldown = 0;
   if (!player.debug) separateBodies();
   document.body.dataset.debug = player.debug; if (weapon) weapon.root.visible = !player.debug && !weapon.disabled;
   syncCollisionWireframes(); updateHUD();
@@ -617,17 +703,19 @@ function updatePlayer(dt) {
   const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8 : 4.7) * (player.debug ? 1.7 : 1);
   const forward = new T.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new T.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
   if (player.debug) camera.getWorldDirection(forward);
+  const climbing = !player.debug && updateClimbing(dt, x, z, forward, keys.has('Space'));
   const delta = forward.multiplyScalar(z).addScaledVector(right, x);
   if (player.debug) delta.y += Number(keys.has('Space')) - Number(keys.has('ControlLeft') || keys.has('ControlRight'));
   if (delta.lengthSq() > 1) delta.normalize(); delta.multiplyScalar(speed * dt);
-  walk = delta.length() / Math.max(dt * 8, .001);
+  walk = climbing ? Math.abs(z) * .3 : delta.length() / Math.max(dt * 8, .001);
   if (player.debug) player.position.add(delta);
-  else {
+  else if (!climbing) {
     move(player, delta.x, delta.z);
     if (keys.has('Space') && player.body.grounded) { player.body.vy = 6.1; player.body.grounded = false; }
     fall(player.body, dt);
   }
   camera.position.copy(eye()); camera.rotation.set(pitch, yaw, 0, 'YXZ'); camera.updateMatrixWorld(true);
+  $('climb-help').hidden = player.debug || !(player.body.ladder || player.body.nearLadder);
 }
 function showMenu(title, subtitle, button) {
   document.body.dataset.playing = 'false'; $('title').textContent = title; $('subtitle').textContent = subtitle; $('start-label').textContent = button;

@@ -29,7 +29,15 @@ try {
     ['stone-flowerbed', 'stoneFlowerbed', { width: 6, depth: 1.2 }, 1],
     ['pocket-paving', 'pocketPaving', { width: 6, depth: 3, stone: true }, 1],
     ['landscape-rocks', 'landscapeRocks', { stones: [[0, 0, 1.9, 1.95, 1.55]], weathered: true, moss: false, exactHeight: true }, 1],
-    ['dry-garden', 'dryGarden', { width: 12, depth: 8, islands: [[0, 0, 1.5, 1, 0]] }, 5]
+    ['dry-garden', 'dryGarden', { width: 12, depth: 8, islands: [[0, 0, 1.5, 1, 0]] }, 5],
+    ['port-ground', 'portGround', {}, 1], ['cargo-container', 'cargoContainer', {}, 3],
+    ['cargo-container', 'cargoContainer', { units: [{ width: 2.6, height: 3, length: 6, yaw: .4, openEnds: [-1, 1], doorAngle: Math.PI * .8 }] }, 3],
+    ['port-access', 'portAccess', {}, 2], ['port-warehouse', 'portWarehouse', {}, 5],
+    ['port-crane', 'portCrane', {}, 4], ['cargo-ship', 'cargoShip', {}, 3],
+    ['port-fixtures', 'portFixtures', {}, 3],
+    ['port-reachstacker', 'portReachstacker', {}, 5], ['port-forklift', 'portForklift', {}, 4],
+    ['port-terminal-tractor', 'portTerminalTractor', {}, 5], ['port-terminal-tractor', 'portTerminalTractor', { trailer: false }, 5],
+    ['port-cargo-workarea', 'portCargoWorkarea', {}, 4], ['port-service', 'portService', {}, 6], ['port-utilities', 'portUtilities', {}, 4], ['vertical-ladder', 'verticalLadder', {}, 2]
   ];
   for (const [file, name, options, limit] of cases) {
     await page.evaluate(() => { window.FPS = { models: {} }; });

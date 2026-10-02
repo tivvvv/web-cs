@@ -5,7 +5,9 @@ FPS.models.coastalBeach = (T, o = {}) => {
   const p = g.attributes.position, colors = [], color = new T.Color(), dry = new T.Color(0xd7c39b), wet = new T.Color(0xa99a78);
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), z = p.getZ(i) + sandStart - 30;
-    const y = sandLevel + (z - sandStart) * slope - Math.max(0, Math.abs(x) - halfWidth) * edgeSlope;
+    let y = sandLevel + (z - sandStart) * slope - Math.max(0, Math.abs(x) - halfWidth) * edgeSlope;
+    for (const { bounds: [x0, z0, x1, z1], bottom } of o.basins ?? [])
+      if (x >= x0 && x <= x1 && z >= z0 && z <= z1) y = Math.min(y, bottom);
     p.setXYZ(i, x, y, z); g.attributes.uv.setXY(i, x * .4, z * .4);
     // 高潮线以内保留湿沙, 向干沙渐变, 避免水退后出现突兀色带.
     color.copy(wet).lerp(dry, Math.max(0, Math.min(1, (y + 1.82) / .32))); colors.push(color.r, color.g, color.b);

@@ -15,10 +15,11 @@
   const level = z => z >= neighborhood.start ? neighborhood.height : 0;
   // 沙滩网格与浪花共用坡面参数, 防止岸线错位.
   const shoreline = { sandLevel: -1.05, sandStart: -18, slope: .04, halfWidth: 80, edgeSlope: .045 };
+  const harborBasin = { bounds: [70, -78, 170, -18], bottom: -6 };
   const sun = [-36, 29, -28];
   // 先地面, 再近景主体, 然后远景与植被. 地面上表面为 Y=0.
   place('coastal-ground', 'kamakuraGround', [0, 0, 0], {}, [box([100, .6, 76], [0, -.3, 20]), box([8.2, .17, 4.6], [0, .085, 0])]);
-  place('coastal-beach', 'coastalBeach', [0, 0, 0], shoreline);
+  place('coastal-beach', 'coastalBeach', [0, 0, 0], { ...shoreline, basins: [harborBasin] });
   const { height, start, depth, width, steps, tread, stairWidth } = neighborhood;
   // 保留站区原坐标, 向 +X/+Z 扩展四角, 中心及十字连接带暂时只铺平地.
   const regionPlan = {
@@ -27,7 +28,7 @@
       { id: 'southwest', name: '海滨车站', center: [0, 20], status: 'developed' },
       { id: 'northwest', name: '神社与林间公园', center: [0, 116], status: 'developed' },
       { id: 'northeast', name: '商店街与生活街区', center: [120, 116], status: 'flat' },
-      { id: 'southeast', name: '渔港与仓储区', center: [120, 20], status: 'flat' }
+      { id: 'southeast', name: '集装箱货运码头', center: [120, 20], status: 'developed' }
     ],
     center: { name: '中央广场', position: [60, 68], size: [20, 20], status: 'flat' }
   };
@@ -36,13 +37,312 @@
   const pondCut = [pond.x - pond.width / 2, pond.z - pond.depth / 2, pond.x + pond.width / 2, pond.z + pond.depth / 2];
   const shore = Array.from({ length: 40 }, (_, i) => { const a = i * Math.PI / 20; return [(pond.width / 2 - 2) * Math.cos(a) * (1 + .09 * Math.sin(a)), Math.round((pond.depth / 2 - 2) * Math.sin(a) * 10000) / 10000]; });
 
-  const parcels = [...[[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]), ...regionPlan.corners.slice(2).map(r => [...r.center, ...regionPlan.cellSize]), [60, 68, 20, 172], [0, 68, 100, 20], [120, 68, 100, 20]];
+  const parcels = [...[[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]), ...regionPlan.corners.slice(2, 3).map(r => [...r.center, ...regionPlan.cellSize]), [60, 68, 20, 172], [0, 68, 100, 20], [120, 68, 100, 20]];
   const slabs = parcels.map(([x, z, w, d]) => box([w, height + .6, d], [x, (height - .6) / 2, z]));
   slabs.push(box([pond.width, height + .6 + pond.bottom, pond.depth], [pond.x, (height + pond.bottom - .6) / 2, pond.z]));
   // 外围用简单实心挡墙, 不复制砖块细节; 内部地块相接, 无叠面或额外台阶.
-  const edges = [box([220, 1.8, .54], [60, height + .9, 153.73]), box([.54, 1.8, 171.46], [169.73, height + .9, 67.73]),
-    box([119.46, 1.8, .54], [109.73, height + .9, -17.73]), box([.54, 1.8, 95.41], [-49.6, height + .9, 105.755])];
+  const edges = [box([220, 1.8, .54], [60, height + .9, 153.73]), box([.54, 1.8, 95.73], [169.73, height + .9, 105.865]),
+    box([19.73, 1.8, .54], [59.865, height + .9, -17.73]), box([.54, 1.8, 95.41], [-49.6, height + .9, 105.755])];
   place('reserved-district-ground', 'districtGround', [0, 0, 0], { slabs, edges }, [...slabs, ...edges]);
+  // 集装箱码头: 低岸线, 作业台地, 箱顶与仓库夹层; 独立模型共用以下尺寸和实体支撑.
+  const port = { center: [120, 20], yardY: height, quayY: .6, bounds: [70, -18, 170, 58] };
+  const portPoint = ([x, y, z]) => [x - port.center[0], y, z - port.center[1]];
+  const portWorld = ([x, y, z]) => [x + port.center[0], y, z + port.center[1]];
+  const portBox = (size, point, kind) => ({ ...box(size, portPoint(point)), ...(kind ? { kind } : {}) });
+  const portSlabs = [portBox([100, 3.6, 21.4], [120, -1.2, -7.3]), portBox([100, 5.4, 54.6], [120, -.3, 30.7])];
+  const portWalls = [portBox([.26, 1.8, 21.4], [70.13, 1.5, -7.3], 'wall')];
+  for (const [a, b] of [[70, 81.5], [86.5, 121.5], [126.5, 161.5], [166.5, 170]])
+    portWalls.push(portBox([b - a, 1.8, .4], [(a + b) / 2, 1.5, 3.2], 'wall'));
+  const markings = [];
+  const paint = (points, width = .16, color = '#d5bd72', closed = false) => markings.push({ points: points.map(([x, z]) => [x - 120, z - 20]), width, color, closed });
+  for (const x of [74, 82]) paint([[x, 5], [x, 55]]);
+  for (const z of [4.5, 57]) paint([[72, z], [168, z]]);
+  for (const [x, z, w, d] of [[100, 30, 9.6, 13.2], [158, 19, 9, 13.2], [124.4, 46, 7.8, 13.2], [112, 16, 10, 14], [98, -10, 27, 5]])
+    paint([[x - w / 2, z - d / 2], [x + w / 2, z - d / 2], [x + w / 2, z + d / 2], [x - w / 2, z + d / 2]], .14, '#c9cdb0', true);
+  for (const z of [12, 30, 48]) { paint([[78, z - 2], [78, z + 2]], .35); paint([[76.9, z + .6], [78, z + 2], [79.1, z + .6]], .35); }
+  const portInsets = [[81.1, 2.4, 31, .36, 47, 'drain'], [145, 2.4, 31.7, 18, .34, 'drain'],
+    [78, 2.4, 19, 1.1, .85, 'hatch'], [132.5, 2.4, 27.7, 1.1, .85, 'hatch'], [114, .6, -6, 1.1, .85, 'hatch']]
+    .map(([x, y, z, w, d, kind]) => ({ position: portPoint([x, y, z]), size: [w, d], kind }));
+  place('port-ground', 'portGround', [120, 0, 20], { width: 100, depth: 76, slabs: portSlabs, walls: portWalls, markings, insets: portInsets,
+    patches: [[116, 51, 6, 8], [145, 31, 9, 2.5], [78.2, 25, 5.5, 4], [130.8, 26.5, 3, 2], [113.5, -5.5, 5, 2.4]].map(([x, z, w, d]) => ({ position: [x - 120, z - 20], size: [w, d] })),
+    dampPatches: [[81.1, 49.5, 1.6, 7, .78], [145, 31.7, 6, 1.5, .7], [157.1, 31.9, 1.5, 1, .6]].map(([x, z, w, d, strength]) => ({ position: [x - 120, z - 20], size: [w, d], strength })),
+    tracks: [
+      [[77, 8], [77.2, 20], [78.2, 29], [78.4, 40], [77.8, 54]],
+      [[81, 23], [87, 24.5], [95, 26], [104, 26.6], [113, 26], [119, 25]],
+      [[116.4, 51.5], [116.8, 46.5], [118.2, 42], [121, 39], [127, 36], [131, 35.5]]
+    ].map(points => ({ points: points.map(([x, z]) => [x - 120, z - 20]), width: .23, gauge: 1.6 })),
+    craneRails: [-12.5, -4.5].map(z => ({ a: portPoint([139, .6, z]), b: portPoint([168, .6, z]) })),
+    labels: [[100, 38, 'A-01'], [158, 28, 'B-02'], [124, 54, 'C-03']].map(([x, z, label]) => ({ position: [x - 120, z - 20], label })) }, [...portSlabs, ...portWalls]);
+
+  const cargoSkin = { wall: .125, floor: .16, roof: .22, end: .14, door: .075 };
+  const cargoUnits = [
+    [86, height, 15, 12, 0, 0x637d7f, [-1]], [89, height, 36, 12, 0, 0xb17157, [-1]],
+    [96, height, 7, 12, Math.PI / 2, 0x50767e], [111, height, 7, 6, Math.PI / 2, 0xb39c62],
+    [100, height, 30, 12, 0, 0x476f7b], [100, height + 3, 30, 12, 0, 0x987354], [103.2, height, 30, 12, 0, 0x789487],
+    [110, height, 16, 12, 0, 0x8d665a], [115, height, 16, 12, 0, 0x587c89], [111, height, 34, 12, 0, 0x7c9074, [-1, 1]],
+    [116, height, 32, 6, 0, 0xae9560, [1]], [103, height, 49, 12, 0, 0x788482], [108, height, 49, 12, 0, 0x9c6556],
+    [122.8, height, 46, 12, 0, 0x3e6c76], [126, height, 46, 12, 0, 0x829581],
+    [127, height, 18, 12, Math.PI / 2, 0x728a88], [130, height, 8, 6, Math.PI / 2, 0x9e7259],
+    [141, height, 15, 12, 0, 0x587d85, [-1]], [145, height, 18, 6, 0, 0xa99469],
+    [156, height, 19, 12, 0, 0x3e7483], [156, height + 3, 19, 12, 0, 0x8a9d83],
+    [159.2, height, 19, 12, 0, 0xaa6b50], [159.2, height + 3, 19, 12, 0, 0x526c7b],
+    [96, .6, -10, 12, Math.PI / 2, 0x8f7357], [108, .6, -10, 6, Math.PI / 2, 0x4f7f82], [127, .6, -10, 6, Math.PI / 2, 0x768878, [-1]]
+  ].map(([x, y, z, length, yaw, color, openEnds = []]) => ({ position: portPoint([x, y, z]), width: 2.6, height: 3, length, yaw, color,
+    skin: cargoSkin, openEnds, doorAngle: Math.PI * .8 }));
+  const cargoBox = (u, size, offset) => {
+    const c = Math.cos(u.yaw), s = Math.sin(u.yaw);
+    return box([size[0] * Math.abs(c) + size[2] * Math.abs(s), size[1], size[0] * Math.abs(s) + size[2] * Math.abs(c)],
+      [u.position[0] + offset[0] * c + offset[2] * s, u.position[1] + offset[1], u.position[2] - offset[0] * s + offset[2] * c]);
+  };
+  const cargoBoxes = cargoUnits.flatMap(u => {
+    const { width: w, height: h, length: l, skin, openEnds } = u;
+    if (!openEnds.length) return [cargoBox(u, [w, h, l], [0, h / 2, 0])];
+    const shells = [cargoBox(u, [w, skin.floor, l], [0, skin.floor / 2, 0]), cargoBox(u, [w, skin.roof, l], [0, h - skin.roof / 2, 0]),
+      ...[-1, 1].map(side => cargoBox(u, [skin.wall, h, l], [side * (w / 2 - skin.wall / 2), h / 2, 0])),
+      ...[-1, 1].filter(sign => !openEnds.includes(sign)).map(sign => cargoBox(u, [w, h, skin.end], [0, h / 2, sign * (l / 2 - skin.end / 2)]))];
+    // 打开的门扇按实际铰链旋转并分成短条, 不用整箱或门扇大 AABB 封住入口.
+    const leaf = (w - .28) / 2, count = Math.ceil(leaf / .4);
+    for (const sign of openEnds) for (const side of [-1, 1]) {
+      const yaw = sign * side * u.doorAngle, angle = u.yaw + yaw, c = Math.cos(angle), s = Math.sin(angle);
+      for (let i = 0; i < count; i++) {
+        const x = side * (w / 2 - .14) - side * leaf * (i + .5) / count * Math.cos(yaw), z = sign * (l / 2 - .055) + side * leaf * (i + .5) / count * Math.sin(yaw);
+        const uc = Math.cos(u.yaw), us = Math.sin(u.yaw), p = [u.position[0] + x * uc + z * us, u.position[1] + h / 2, u.position[2] - x * us + z * uc], thickness = skin.door + .12;
+        shells.push(box([Math.abs(c) * leaf / count + Math.abs(s) * thickness, h - .28, Math.abs(s) * leaf / count + Math.abs(c) * thickness], p));
+      }
+    }
+    return shells;
+  });
+  place('port-cargo-stacks', 'cargoContainer', [120, 0, 20], { units: cargoUnits }, cargoBoxes);
+
+  const access = { boxes: [], beams: [] }, stairRoutes = [], accessRailRuns = [], levelRailBodies = [], railPosts = new Set();
+  const accessBox = (size, point, kind = 'deck', decorative = false) => access.boxes.push({ ...portBox(size, point, kind), ...(decorative ? { decorative: true } : {}) });
+  const railPost = point => {
+    const key = point.map(v => v.toFixed(4)).join(','); if (railPosts.has(key)) return;
+    railPosts.add(key); accessBox([.065, 1.12, .065], [point[0], point[1] + .56, point[2]], 'rail', true);
+  };
+  function levelRail(a, b, y) {
+    const p = [a[0], y, a[1]], q = [b[0], y, b[1]], count = Math.max(1, Math.ceil(Math.hypot(b[0] - a[0], b[1] - a[1]) / 2));
+    accessRailRuns.push({ a: p, b: q });
+    for (const lift of [.55, 1.1]) access.beams.push({ a: portPoint([p[0], y + lift, p[2]]), b: portPoint([q[0], y + lift, q[2]]), width: .065, kind: 'rail' });
+    for (let i = 0; i <= count; i++) railPost(p.map((v, j) => v + (q[j] - v) * i / count));
+    levelRailBodies.push(portBox([Math.abs(q[0] - p[0]) + .065, .615, Math.abs(q[2] - p[2]) + .065], [(p[0] + q[0]) / 2, y + .825, (p[2] + q[2]) / 2]));
+  }
+  function portStairs(id, a, b, width = 2.2) {
+    const count = Math.ceil(Math.abs(b[1] - a[1]) / .2), dx = (b[0] - a[0]) / count, dz = (b[2] - a[2]) / count, dy = (b[1] - a[1]) / count;
+    stairRoutes.push({ id, a, b, width, count });
+    for (let i = 0; i < count; i++) {
+      const x = a[0] + dx * (i + .5), z = a[2] + dz * (i + .5), y = a[1] + dy * (i + 1);
+      accessBox([Math.abs(dx) || width, .08, Math.abs(dz) || width], [x, y - .04, z], 'step');
+    }
+    const across = dx ? [0, 0, 1] : [1, 0, 0];
+    for (const side of [-1, 1]) {
+      const p = a.map((v, i) => v + across[i] * side * (width / 2 - .03)), q = b.map((v, i) => v + across[i] * side * (width / 2 - .03));
+      accessRailRuns.push({ a: p, b: q });
+      for (const lift of [-.14, .55, 1.1]) access.beams.push({ a: portPoint([p[0], p[1] + lift, p[2]]), b: portPoint([q[0], q[1] + lift, q[2]]), width: lift < 0 ? .12 : .065, kind: lift < 0 ? 'leg' : 'rail' });
+      for (let i = 0; i <= count; i += 3) {
+        const t = i / count, x = p[0] + (q[0] - p[0]) * t, y = p[1] + (q[1] - p[1]) * t, z = p[2] + (q[2] - p[2]) * t;
+        // 柱子与两道扶手共用下方的侧栏碰撞带, 不重复检测每根小柱.
+        railPost([x, y, z]);
+      }
+      railPost(q);
+      for (const t of [1 / 3, 2 / 3]) {
+        const top = p[1] + (q[1] - p[1]) * t - .14, foot = Math.min(a[1], b[1]);
+        accessBox([.09, top - foot, .09], [p[0] + (q[0] - p[0]) * t, (top + foot) / 2, p[2] + (q[2] - p[2]) * t], 'leg');
+      }
+    }
+  }
+  for (const x of [84, 124, 164]) portStairs('quay-' + x, [x, .6, -2], [x, height, 3.4], 5);
+  portStairs('stack-a-west', [95, height, 15.8], [95, height + 6, 33.8]);
+  accessBox([2.2, .12, 2.2], [95, height + 5.94, 34.9]); accessBox([2.6, .12, 2.2], [97.4, height + 5.94, 34.9]);
+  portStairs('stack-a-front', [103.2, height, 15], [103.2, height + 3, 24]);
+  portStairs('stack-a-roof', [103.2, height + 3, 25], [103.2, height + 6, 34]);
+  accessBox([2.2, .12, 1.2], [103.2, height + 5.94, 34.6]); accessBox([.8, .12, 1.2], [101.7, height + 5.94, 34.6]);
+  accessBox([.6, .12, 2], [101.6, height + 2.94, 25]);
+  portStairs('stack-b-south', [152, height, 5], [152, height + 6, 23]);
+  accessBox([2.2, .12, 1.2], [152, height + 5.94, 23.6]); accessBox([1.6, .12, 1.2], [153.9, height + 5.94, 23.6]);
+  portStairs('stack-b-back', [163.5, height, 42], [163.5, height + 6, 24]);
+  accessBox([2.2, .12, 1.2], [163.5, height + 5.94, 23.4]); accessBox([1.9, .12, 1.2], [161.45, height + 5.94, 23.4]);
+  portStairs('warehouse-cargo', [122.8, height, 31], [122.8, height + 3, 40]);
+  accessBox([7.1, .16, 2.6], [130.85, height + 2.92, 47]);
+  accessBox([.6, .12, 2.6], [124.4, height + 2.94, 47]);
+  accessBox([23.2, .16, 6.5], [146, height + 2.92, 47.25]);
+  for (const x of [137, 155]) portStairs('warehouse-inside-' + x, [x, height + .04, 35.5], [x, height + 3, 44]);
+  // 夹层开口取两部楼梯扶手的实际端点, 平栏与斜栏在同一根端柱闭合.
+  const galleryStairs = stairRoutes.filter(s => s.id.startsWith('warehouse-inside-'));
+  const galleryEnds = galleryStairs.flatMap(s => [s.b[0] - s.width / 2 + .03, s.b[0] + s.width / 2 - .03]);
+  const galleryLadder = { x: 146, z: 43.82, opening: 1.4 };
+  for (const [a, b] of [[134.4, galleryEnds[0]], [galleryEnds[1], galleryLadder.x - galleryLadder.opening / 2],
+    [galleryLadder.x + galleryLadder.opening / 2, galleryEnds[2]], [galleryEnds[3], 157.6]]) {
+    levelRail([a, 44], [b, 44], height + 3);
+  }
+  for (const x of [135, 145, 157]) accessBox([.16, 2.84, .16], [x, height + 1.42, 49.8], 'leg');
+  for (const z of [45.72, 48.28]) {
+    levelRail([127.3, z], [134.4, z], height + 3);
+  }
+  levelRail([134.4, 44], [134.4, 45.72], height + 3);
+  levelRail([134.4, 48.28], [134.4, 50.48], height + 3);
+  // 登顶平台的外侧设双横杆, 箱顶方向留口; 支腿落在作业地面.
+  for (const [x0, x1, z, y] of [[93.93, 98.7, 35.97, 8.4], [101.3, 104.27, 35.17, 8.4], [150.93, 154.7, 24.17, 8.4], [160.5, 164.57, 22.83, 8.4]]) {
+    levelRail([x0, z], [x1, z], y);
+    for (const x of [x0 + .04, x1 - .04]) {
+      accessBox([.12, y - height - .12, .12], [x, (y - .12 + height) / 2, z], 'leg');
+    }
+  }
+  for (const [a, b] of [
+    [[93.93, 33.8], [93.93, 35.97]], [[96.07, 33.8], [98.7, 33.8]],
+    [[104.27, 34], [104.27, 35.17]], [[101.3, 34], [102.13, 34]],
+    [[150.93, 23], [150.93, 24.17]], [[153.07, 23], [154.7, 23]],
+    [[164.57, 24], [164.57, 22.83]], [[160.5, 24], [162.43, 24]]
+  ]) levelRail(a, b, height + 6);
+  const jumpSteps = [[100, .75, -5.8], [98.4, 1.5, -6.6], [96.8, 2.25, -7.4]];
+  for (const [x, h, z] of jumpSteps) accessBox([1.5, h, 1.5], [x, .6 + h / 2, z], 'crate');
+  // 每侧的双横杆和小柱共用窄带, 沿坡度分段保留楼梯下方空间.
+  const accessRails = stairRoutes.flatMap(({ a, b, width }) => {
+    const dx = b[0] - a[0], dz = b[2] - a[2], count = Math.ceil(Math.hypot(dx, dz) / 1.8), across = dx ? [0, 0, 1] : [1, 0, 0];
+    return [-1, 1].flatMap(side => Array.from({ length: count }, (_, i) => {
+      const p = a.map((v, j) => v + (b[j] - v) * i / count), q = a.map((v, j) => v + (b[j] - v) * (i + 1) / count);
+      const low = Math.min(p[1], q[1]) + .5175, high = Math.max(p[1], q[1]) + 1.1325;
+      return portBox([Math.abs(q[0] - p[0]) + .065, high - low, Math.abs(q[2] - p[2]) + .065],
+        [(p[0] + q[0]) / 2 + across[0] * side * (width / 2 - .03), (low + high) / 2, (p[2] + q[2]) / 2 + across[2] * side * (width / 2 - .03)]);
+    }));
+  });
+  place('port-access-routes', 'portAccess', [120, 0, 20], access, [...access.boxes.filter(b => !b.decorative), ...accessRails, ...levelRailBodies]);
+  // 竖梯在箱端和夹层提供短路线; 造型, 身体边框与通用攀爬数据共用位置和尺寸.
+  const portLadders = [
+    { id: 'stack-a-ladder', position: portPoint([100, height, 36.13]), height: 6, yaw: 0 },
+    { id: 'stack-b-ladder', position: portPoint([159.2, height, 12.87]), height: 6, yaw: Math.PI },
+    { id: 'single-box-ladder', position: portPoint([108, height, 55.13]), height: 3, yaw: 0 },
+    { id: 'warehouse-gallery-ladder', position: portPoint([galleryLadder.x, height + .04, galleryLadder.z]), height: 2.96, yaw: Math.PI,
+      topWidth: galleryLadder.opening, returnDepth: .18, mount: false, returnPost: false }
+  ].map(l => ({ width: .9, returnDepth: .28, ...l }));
+  const climbRoutes = portLadders.map(l => {
+    const normal = [Math.sin(l.yaw), 0, Math.cos(l.yaw)], top = [l.position[0], l.position[1] + l.height, l.position[2]];
+    return { id: l.id, bottom: l.position, top, normal, width: l.width, exit: top.map((v, i) => v - normal[i] * .65) };
+  });
+  place('port-vertical-ladders', 'verticalLadder', [120, 0, 20], { ladders: portLadders }, portLadders.flatMap(l => [-1, 1].map(side =>
+    facadeBox([(l.topWidth ?? l.width) / 2 - l.width / 2 + .16, l.height + 1.14, l.returnDepth + .15], { position: l.position, yaw: l.yaw },
+      [side * (l.width + (l.topWidth ?? l.width)) / 4, (l.height + 1.14) / 2, -l.returnDepth / 2]))));
+  instances.at(-1).traversal = { ladders: climbRoutes };
+
+  const warehouse = { width: 24, depth: 18, height: 8, roof: { rise: 1.35, overhang: .4, thickness: .12 }, canopy: { width: 8.5, depth: 2.3, height: 4.5 },
+    floorZones: [{ bounds: [-6.7, -5, -3.3, -3.4], label: 'A-02' }, { bounds: [2.6, -6.7, 5.4, -1.8], label: 'FORKLIFT' },
+      { bounds: [2.78, 6.33, 6.22, 7.67], label: 'B-02' }, { bounds: [9.32, 4.65, 11.68, 5.75], label: 'SERVICE' }], shell: [box([24, .08, 18], [0, 0, 0])] };
+  warehouse.shell[0].kind = 'floor';
+  const wall = (size, point) => warehouse.shell.push({ ...box(size, point), kind: 'wall' });
+  for (const side of [-1, 1]) {
+    for (const x of [-7.8, 7.8]) wall([8.4, 8, .22], [x, 4, side * 8.89]);
+    wall([7.2, 3.8, .22], [0, 6.1, side * 8.89]);
+  }
+  wall([.22, 3, 18], [-11.89, 1.5, 0]); wall([.22, 2.7, 18], [-11.89, 6.65, 0]);
+  wall([.22, 2.3, 12.5], [-11.89, 4.15, -2.75]); wall([.22, 2.3, 2.5], [-11.89, 4.15, 7.75]);
+  for (const z of [-6.3, 6.3]) wall([.22, 8, 5.4], [11.89, 4, z]); wall([.22, 3.8, 7.2], [11.89, 6.1, 0]);
+  // 坡屋顶按窄条包围, 共用屋面坡度和厚度, 避免一个大盒形成悬空天花板.
+  const roofHalf = warehouse.width / 2 + warehouse.roof.overhang, roofCount = Math.ceil(roofHalf / .75), roofSlope = warehouse.roof.rise / (warehouse.width / 2);
+  const roofSkin = warehouse.roof.thickness / 2 * Math.hypot(1, roofSlope), warehouseRoof = [];
+  for (const side of [-1, 1]) for (let i = 0; i < roofCount; i++) {
+    const a = roofHalf * i / roofCount, b = roofHalf * (i + 1) / roofCount;
+    const low = warehouse.height + warehouse.roof.rise - b * roofSlope - roofSkin, high = warehouse.height + warehouse.roof.rise - a * roofSlope + roofSkin;
+    warehouseRoof.push(box([b - a, high - low, warehouse.depth + warehouse.roof.overhang * 2], [side * (a + b) / 2, (low + high) / 2, 0]));
+  }
+  const canopy = warehouse.canopy, canopyZ = -warehouse.depth / 2 - canopy.depth / 2;
+  const warehouseExtras = [box([canopy.width, .14, canopy.depth + .2], [0, canopy.height + .05, canopyZ]),
+    ...[-1, 1].map(s => box([.13, canopy.height, .13], [s * (canopy.width / 2 - .18), canopy.height / 2, -warehouse.depth / 2 - canopy.depth + .12]))];
+  place('port-logistics-warehouse', 'portWarehouse', [146, height, 42], warehouse, [...warehouse.shell, ...warehouseRoof, ...warehouseExtras]);
+
+  const craneBodies = [-7, 7].flatMap(x => [-4, 4].flatMap(z => [box([2.2, .95, 2.3], [x, .475, z]), box([.72, 14, .72], [x, 7.5, z])]));
+  place('port-gantry-crane', 'portCrane', [150, .6, -8.5], {}, craneBodies);
+  place('port-moored-freighter', 'cargoShip', [122, -2.05, -31], { length: 78, width: 16 }, [box([78, 6.7, 16], [0, 1.55, 0])]);
+  const railRuns = [
+    { a: [70.3, .6, -17.7], b: [169.7, .6, -17.7] },
+    { a: [169.7, .6, -17.7], b: [169.7, .6, 3.4] }, { a: [169.7, height, 3.4], b: [169.7, height, 58] }
+  ];
+  const bollards = [74, 86, 112, 136, 162].map(x => [x, .6, -16.2]);
+  const fixtures = { rails: railRuns.map(r => ({ a: portPoint(r.a), b: portPoint(r.b) })), bollards: bollards.map(portPoint),
+    fenders: [76, 87, 112, 134, 156, 166].map(x => portPoint([x, -1.2, -18.03])),
+    ropes: [{ a: portPoint([86, 1.23, -16.2]), b: portPoint([89, 2.5, -23]), sag: .3 }, { a: portPoint([162, 1.23, -16.2]), b: portPoint([151, 2.5, -25]), sag: .25 }],
+    coils: [[75.1, .6, -15.25], [113, .6, -15.25], [160.8, .6, -15.15]].map(p => ({ position: portPoint(p), radius: .48 })),
+    signs: [{ position: portPoint([73, 6.4, 44]), width: 7.2, yaw: -Math.PI / 2, slot: 0, gate: true },
+      { position: portPoint([80, 2.9, -14.5]), width: 2.8, yaw: 0, slot: 1 }, { position: portPoint([144, 4.7, 30]), width: 2.8, yaw: Math.PI, slot: 2 }] };
+  const portBarriers = railRuns.map(({ a, b }) => portBox([Math.abs(b[0] - a[0]) || .12, 2.1, Math.abs(b[2] - a[2]) || .12], [(a[0] + b[0]) / 2, a[1] + 1.05, (a[2] + b[2]) / 2]));
+  const signBodies = fixtures.signs.flatMap(({ position: [x, y, z], width, yaw, gate }) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw), panel = box([Math.abs(c) * (width + .12) + Math.abs(s) * .12, width * .156 + .12, Math.abs(s) * (width + .12) + Math.abs(c) * .12], [x, y, z]);
+    return [panel, ...(gate ? [-1, 1].map(side => box([.18, 4.6, .18], [x + side * (width / 2 + .22) * c, y - 1.7, z - side * (width / 2 + .22) * s])) : [box([.1, 2.2, .1], [x, y - 1.2, z])])];
+  });
+  place('port-quay-fixtures', 'portFixtures', [120, 0, 20], fixtures, [...portBarriers, ...bollards.map(p => portBox([.76, .8, .65], [p[0], p[1] + .4, p[2]])), ...signBodies]);
+
+  // 装卸车辆集中在箱堆间作业区, 西侧车道/仓库门洞/楼梯落脚点保持通畅.
+  const reachBodies = [box([3.7, .62, 6.8], [0, 1.18, -.65]), box([3.9, 1.35, 2.4], [0, 1.88, -2.75]),
+    box([2.4, 2.46, 2.15], [0, 2.73, -.6]), box([4.52, 1.9, 1.92], [0, .95, 1.9]), box([4.52, 1.67, 1.63], [0, .835, -2.4]),
+    box([.94, 3.6, 3.1], [0, 3.79, 2.275]), box([.68, 1.95, 2.66], [0, 5.57, 4.15]), box([2.6, .91, 3], [0, 6.14, 5.4])];
+  place('port-reachstacker', 'portReachstacker', [116.6, height, 50.3], {}, reachBodies, [0, Math.PI, 0]);
+  const forkliftBodies = [box([1.89, 1.48, 2.5], [0, .74, -.15]), box([1.45, .13, 1.66], [0, 2.485, -.15]),
+    ...[-1, 1].flatMap(s => [box([.095, 1.6, .095], [s * .61, 1.65, -.79]), box([.095, 1.6, .095], [s * .61, 1.66, .48]),
+      box([.18, 2.79, .25], [s * .52, 1.395, 1.09]), box([.16, .11, 1.61], [s * .38, .295, 2.035])]),
+    box([1.26, .16, .22], [0, 2.79, 1.09]), box([1.22, .2, .14], [0, .88, 1.26])];
+  place('port-warehouse-forklift', 'portForklift', [150, height + .04, 38.4], {}, forkliftBodies, [0, Math.PI, 0]);
+  const tractorBodies = [box([2.46, 1.12, 4.67], [0, .56, 0]), box([2.42, 2.65, 2.15], [0, 1.985, .88]),
+    ...[-.82, .82].map(x => box([.22, .35, 9.2], [x, 1.47, -6.04])),
+    ...[-1.55, -3.4, -5.6, -7.6, -10.5].map(z => box([2.55, .4, .37], [0, 1.5, z])),
+    ...[-7.8, -8.75, -9.7].map(z => box([2.48, 1.14, 1.12], [0, .57, z])),
+    ...[-.91, .91].map(x => box([.35, 1.25, .4], [x, 1.005, -4.08])), box([2.4, .25, .23], [0, .67, -10.63])];
+  place('port-terminal-tractor', 'portTerminalTractor', [119, height, 25], {}, tractorBodies, [0, -Math.PI / 2, 0]);
+
+  // 货位按装卸/储存/检修分组. 低层架放在夹层下, 高架避让楼梯和贯通门洞.
+  const racks = [
+    { position: portPoint([141, height + .04, 37.8]), width: 3, depth: 1.15, height: 4.15, levels: [.24, 1.7, 3.15] },
+    { position: portPoint([150.5, height + .04, 49]), width: 3.1, depth: 1.1, height: 2.65, levels: [.22, 1.55] }
+  ];
+  const loads = [
+    [143, 2.44, 45.6, 'wrapped', [1.2, 1.35, 1.1]], [141, 2.44, 48.3, 'drums', [1.35, 1.1, 1.25]],
+    [154, 5.4, 49.6, 'crate', [1.4, 1.2, 1.1]], [139.5, 2.4, 29.9, 'wrapped', [1.4, 1.5, 1.2]],
+    [137, 2.4, 54.1, 'crate', [1.4, 1.25, 1.2]], [135.4, 2.4, 54.1, 'wrapped', [1.3, 1.5, 1.2]],
+    [116.4, .6, -11, 'reel', [1.9, 2.1, 1.4]], [118.8, .6, -11.4, 'crate', [1.3, 1.05, 1.1]],
+    [85.2, 2.56, 18.5, 'crate', [.6, 1.25, 1.7]], [88.2, 2.56, 39.3, 'wrapped', [.6, 1.25, 1.5]],
+    [140.2, 2.56, 18.4, 'crate', [.6, 1.25, 1.5]], [115.2, 2.56, 30.4, 'wrapped', [.6, 1.1, 1.2]]
+  ].map(([x, y, z, kind, size]) => ({ position: portPoint([x, y, z]), kind, size }));
+  const benches = [{ position: portPoint([156.5, height + .04, 47.2]) }];
+  place('port-cargo-workarea', 'portCargoWorkarea', [120, 0, 20], { racks, loads, benches }, [
+    ...racks.map(r => box([r.width + .11, r.height, r.depth + .11], [r.position[0], r.position[1] + r.height / 2, r.position[2]])),
+    ...loads.map(l => box([l.size[0] + (l.kind === 'crate' ? .055 : 0), l.size[1] + .015, l.size[2] + (l.kind === 'crate' ? .12 : .055)], [l.position[0], l.position[1] + (l.size[1] + .015) / 2, l.position[2]])),
+    box([2.1, 1.4, .8], [benches[0].position[0], benches[0].position[1] + .7, benches[0].position[2]])
+  ]);
+  const utilities = {
+    fans: [[150.6, 7.2, 32.81, Math.PI], [139, 7.4, 51.19, 0], [158.19, 9.45, 45.6, Math.PI / 2]].map(([x, y, z, yaw]) => ({ position: portPoint([x, y, z]), yaw })),
+    roofVents: [[140, 11.075, 40], [152, 11.075, 46]].map(p => ({ position: portPoint(p) })),
+    lamps: [[139, 9.3, 42, .82], [146, 9.3, 42, .82], [153, 9.3, 42, .82], [156, 5.11, 47.2, .05]].map(([x, y, z, suspension]) => ({ position: portPoint([x, y, z]), suspension })),
+    pipes: [
+      { points: [[150.6, 7.2, 32.73], [157.1, 7.2, 32.73], [157.1, 2.5, 32.73]], clamps: [[157.1, 3.1, 32.73], [157.1, 5, 32.73], [153, 7.2, 32.73]], mount: [0, 0, .31] },
+      { points: [[139, 7.4, 51.27], [134.7, 7.4, 51.27], [134.7, 2.5, 51.27]], clamps: [[134.7, 3.1, 51.27], [134.7, 5, 51.27]], mount: [0, 0, -.31] }
+    ].map(p => ({ points: p.points.map(portPoint), clamps: p.clamps.map(portPoint), radius: .055, mount: p.mount })),
+    trays: [{ a: portPoint([146, 9.9, 33.4]), b: portPoint([146, 9.9, 50.6]), width: .34, supports: [0, .5, 1], suspension: .22 }]
+  };
+  place('port-warehouse-utilities', 'portUtilities', [120, 0, 20], utilities, [
+    ...utilities.fans.map(f => facadeBox([1.3, 1.3, .64], { position: f.position, yaw: f.yaw }, [0, 0, .12])),
+    ...utilities.roofVents.map(v => box([1.28, 1.66, 1.28], [v.position[0], v.position[1] + .655, v.position[2]])),
+    ...utilities.lamps.map(l => box([1.9, l.suspension + .186, .33], [l.position[0], l.position[1] + (l.suspension - .026) / 2, l.position[2]])),
+    ...utilities.pipes.flatMap(p => p.points.slice(1).map((b, i) => { const a = p.points[i]; return box(a.map((v, j) => Math.abs(b[j] - v) + .12), a.map((v, j) => (v + b[j]) / 2)); })),
+    ...utilities.trays.map(t => box([t.width, .112, Math.abs(t.b[2] - t.a[2])], [t.a[0], t.a[1] + .035, (t.a[2] + t.b[2]) / 2]))
+  ]);
+  const service = {
+    lights: [[80, height, 8], [80, height, 54], [166, height, 49], [135, .6, -15]].map(p => ({ position: portPoint(p), height: 12 })),
+    booths: [{ position: portPoint([73.5, height, 36]) }], barriers: [portPoint([73.5, height, 40.2])],
+    cabinets: [[138.9, height, 32.45, 'fire', Math.PI], [165.8, height, 47, 'electrical', 0], [83, .6, -15.2, 'fire', 0]].map(([x, y, z, kind, yaw]) => ({ position: portPoint([x, y, z]), kind, yaw })),
+    rings: [75, 118, 167].map(x => ({ position: portPoint([x, .6, -17.5]) })),
+    ladders: [81, 132].map(x => ({ position: portPoint([x, .6, -18.02]) })),
+    backgroundDock: { position: portPoint([206, -.6, -82]), width: 50, depth: 15 }
+  };
+  place('port-service-facilities', 'portService', [120, 0, 20], service, [
+    ...service.lights.flatMap(l => [box([.8, .18, .8], [l.position[0], l.position[1] + .09, l.position[2]]), box([.32, l.height, .32], [l.position[0], l.position[1] + .18 + l.height / 2, l.position[2]])]),
+    box([3.22, 2.98, 2.96], [service.booths[0].position[0], height + 1.49, service.booths[0].position[2]]),
+    box([.58, 4.84, .57], [service.barriers[0][0], height + 2.42, service.barriers[0][2]]),
+    ...service.cabinets.flatMap(c => [facadeBox([.9, 1.46, .7], { position: c.position, yaw: c.yaw }, [0, .73, 0]),
+      ...(c.kind === 'fire' ? [facadeBox([.22, .9, .22], { position: c.position, yaw: c.yaw }, [.62, .45, 0])] : [])]),
+    ...service.rings.map(r => box([.3, 2.05, .3], [r.position[0], r.position[1] + 1.025, r.position[2]]))
+  ]);
+  regionPlan.corners[3].routes = { stairs: stairRoutes, rails: accessRailRuns,
+    ladders: climbRoutes.map(l => ({ ...l, bottom: portWorld(l.bottom), top: portWorld(l.top), exit: portWorld(l.exit) })),
+    jumpSteps, quayY: .6, yardY: height, warehouse: [146, height, 42] };
+
   // 西北公园: 南北参道, 西侧园林, 东侧湖面与北侧拜殿; 环路与东侧出口不封闭.
   const parkY = height + .024;
   const dryGarden = { x: -17, z: 97, width: 20, depth: 10, sandHeight: .09, edgeHeight: .14, wallHeight: 1.25, wallOffset: .25, apronDepth: 1.8, gateway: [-2, 3.4] };
@@ -534,7 +834,7 @@
   const utilityRows = [-15, 12, 34, 54];
   poles.push(...[-7.1, 8].flatMap(x => utilityRows.map(z => box([.3, 10.1, .3], [x, level(z) + 5.05, z]))));
   place('overhead-wires', 'coastalUtilities', [0, 0, 0], { rows: utilityRows, rowHeights: utilityRows.map(level) }, poles);
-  place('sagami-bay', 'kamakuraOcean', [0, 0, 0], { ...shoreline, sun });
+  place('sagami-bay', 'kamakuraOcean', [0, 0, 0], { ...shoreline, sun, harbor: harborBasin, harbors: [[120, -24, 100, 12]] });
   for (const [i, [x, z, yaw, size]] of [[-58, -92, .7, 1], [-12, -130, -1.1, 1.1], [60, -108, 1.2, 1], [120, -190, -.6, 1.2], [-150, -225, .9, 1.3], [58, -230, .4, 1], [171, -410, -.7, .7], [-128, -580, .8, .8]].entries()) {
     place('coastal-sailboat-' + i, 'coastalSailboat', [x, -2.05, z], { phase: i * 1.7, color: i % 2 ? 0x718b89 : 0x557e85 }, [], [0, yaw, 0], [size, size, size]);
   }
@@ -595,6 +895,11 @@
       lowHedge: 'models/low-hedge.js', drinkingFountain: 'models/drinking-fountain.js',
       coastalBeach: 'models/coastal-beach.js', stationNeighborhood: 'models/station-neighborhood.js',
       districtGround: 'models/district-ground.js',
+      portGround: 'models/port-ground.js', cargoContainer: 'models/cargo-container.js', portAccess: 'models/port-access.js',
+      portReachstacker: 'models/port-reachstacker.js', portForklift: 'models/port-forklift.js', portTerminalTractor: 'models/port-terminal-tractor.js',
+      portCargoWorkarea: 'models/port-cargo-workarea.js', portService: 'models/port-service.js',
+      portUtilities: 'models/port-utilities.js', verticalLadder: 'models/vertical-ladder.js',
+      portWarehouse: 'models/port-warehouse.js', portCrane: 'models/port-crane.js', cargoShip: 'models/cargo-ship.js', portFixtures: 'models/port-fixtures.js',
       parkTerrain: 'models/park-terrain.js', parkTrailStones: 'models/park-trail-stones.js',
       parkGroundcover: 'models/park-groundcover.js',
       parkTree: 'models/park-tree.js',
@@ -632,8 +937,8 @@
     atmosphere: { sky: 0xa6cbdc, fogNear: 130, fogFar: 1800, exposure: .94, cameraFar: 8000, fov: 64, pixelRatio: 1.5 },
     lights: [
       { type: 'hemisphere', sky: 0xc8e5f4, ground: 0x8c8065, intensity: 1.15, position: [0, 25, 0] },
-      // 两区共用太阳与静态阴影缓存, 4096 阴影图改善雨棚/木构边缘, 不增加逐帧投影光源.
-      { type: 'sun', color: 0xffedce, intensity: 3.15, position: [-108, 89.4, -14], target: [0, 2.4, 70], shadow: true, shadowExtent: 105, shadowFar: 320, shadowSize: 4096, shadowBias: -.0002, staticShadow: true }
+      // 全图共用太阳与静态阴影缓存, 保持太阳方向和 4096 图, 覆盖东侧码头且不增加投影光源.
+      { type: 'sun', color: 0xffedce, intensity: 3.15, position: [-48, 89.4, -16], target: [60, 2.4, 68], shadow: true, shadowExtent: 140, shadowFar: 320, shadowSize: 4096, shadowBias: -.0002, staticShadow: true }
     ],
     instances
   };
