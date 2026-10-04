@@ -37,7 +37,18 @@ try {
     ['port-fixtures', 'portFixtures', {}, 3],
     ['port-reachstacker', 'portReachstacker', {}, 5], ['port-forklift', 'portForklift', {}, 4],
     ['port-terminal-tractor', 'portTerminalTractor', {}, 5], ['port-terminal-tractor', 'portTerminalTractor', { trailer: false }, 5],
-    ['port-cargo-workarea', 'portCargoWorkarea', {}, 4], ['port-service', 'portService', {}, 6], ['port-utilities', 'portUtilities', {}, 4], ['vertical-ladder', 'verticalLadder', {}, 2]
+    ['port-cargo-workarea', 'portCargoWorkarea', {}, 4], ['port-service', 'portService', {}, 6], ['port-utilities', 'portUtilities', {}, 4], ['vertical-ladder', 'verticalLadder', {}, 2],
+    ['coastal-mountain', 'coastalMountain', {}, 2],
+    ['mountain-litter', 'mountainLitter', {bounds:[-4,-4,4,4],heights:[2.7,2.7,2.7,2.7],trees:[{position:[0,2.7,0],kind:'pine'}]}, 1],
+    ['mountain-grass', 'mountainGrass', {bounds:[-4,-4,4,4],heights:[2.7,2.7,2.7,2.7],woodland:[[0,0,3]]}, 2],
+    ['coastal-ridges', 'coastalRidges', {}, 1],
+    ['mountain-rocks', 'mountainRocks', { stones: [{ position: [0,0,0], size: [4,3,3] }] }, 1],
+    ['mountain-trails', 'mountainTrails', { boxes: [{size:[4,.5,3],offset:[0,0,0]}],beams:[{a:[-2,1,0],b:[2,1,0]}] }, 3],
+    ['trail-facilities', 'trailFacilities', { shelters:[{position:[0,0,0],width:5.4,depth:3.6,height:2.8,kind:'lookout'}],scopes:[{position:[3,0,0]}] }, 6],
+    ['trail-facilities', 'trailFacilities', {weathered:true,shelters:[{position:[0,0,0],width:4.2,depth:2.8,height:2.55,kind:'lookout'}],scopes:[{position:[3,0,0],yaw:Math.PI}],benches:[{position:[-3,0,0]}]}, 5],
+    ['terrace-ground', 'terraceGround', {}, 3],
+    ['mountain-woodland', 'mountainWoodland', {trees:[{position:[0,0,0],kind:'pine'},{position:[5,0,0],kind:'broadleaf'}]}, 5],
+    ['mountain-groundcover', 'mountainGroundcover', { zones:[{kind:'fern',center:[0,0],radius:3},{kind:'flower',center:[5,0],radius:2},{kind:'scrub',center:[-5,0],radius:2}] }, 3]
   ];
   for (const [file, name, options, limit] of cases) {
     await page.evaluate(() => { window.FPS = { models: {} }; });

@@ -21,27 +21,27 @@
   place('coastal-ground', 'kamakuraGround', [0, 0, 0], {}, [box([100, .6, 76], [0, -.3, 20]), box([8.2, .17, 4.6], [0, .085, 0])]);
   place('coastal-beach', 'coastalBeach', [0, 0, 0], { ...shoreline, basins: [harborBasin] });
   const { height, start, depth, width, steps, tread, stairWidth } = neighborhood;
-  // 保留站区原坐标, 向 +X/+Z 扩展四角, 中心及十字连接带暂时只铺平地.
+  // 保留已定型站区/公园, 各分区的地形与通行由独立规格管理.
   const regionPlan = {
     active: 'southwest', cellSize: [100, 76], connectionWidth: 20, groundY: height,
     corners: [
       { id: 'southwest', name: '海滨车站', center: [0, 20], status: 'developed' },
       { id: 'northwest', name: '神社与林间公园', center: [0, 116], status: 'developed' },
-      { id: 'northeast', name: '商店街与生活街区', center: [120, 116], status: 'flat' },
+      { id: 'northeast', name: '海望山与岩壁步道', center: [120, 116], status: 'developed' },
       { id: 'southeast', name: '集装箱货运码头', center: [120, 20], status: 'developed' }
     ],
-    center: { name: '中央广场', position: [60, 68], size: [20, 20], status: 'flat' }
+    center: { name: '中央广场', position: [60, 68], size: [20, 20], status: 'developed' }
   };
   // 公园东半部湖区挖去原台地, 岸线共用于模型和岸边碰撞, 水下保留真实池底.
   const pond = { x: 25, z: 123, width: 40, depth: 44, bottom: -.55, waterLevel: -.18, rim: .024 };
   const pondCut = [pond.x - pond.width / 2, pond.z - pond.depth / 2, pond.x + pond.width / 2, pond.z + pond.depth / 2];
   const shore = Array.from({ length: 40 }, (_, i) => { const a = i * Math.PI / 20; return [(pond.width / 2 - 2) * Math.cos(a) * (1 + .09 * Math.sin(a)), Math.round((pond.depth / 2 - 2) * Math.sin(a) * 10000) / 10000]; });
 
-  const parcels = [...[[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]), ...regionPlan.corners.slice(2, 3).map(r => [...r.center, ...regionPlan.cellSize]), [60, 68, 20, 172], [0, 68, 100, 20], [120, 68, 100, 20]];
+  const parcels = [...[[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]), [60, 21, 20, 78], [60, 116, 20, 76], [0, 68, 100, 20], [120, 68, 100, 20]];
   const slabs = parcels.map(([x, z, w, d]) => box([w, height + .6, d], [x, (height - .6) / 2, z]));
   slabs.push(box([pond.width, height + .6 + pond.bottom, pond.depth], [pond.x, (height + pond.bottom - .6) / 2, pond.z]));
   // 外围用简单实心挡墙, 不复制砖块细节; 内部地块相接, 无叠面或额外台阶.
-  const edges = [box([220, 1.8, .54], [60, height + .9, 153.73]), box([.54, 1.8, 95.73], [169.73, height + .9, 105.865]),
+  const edges = [box([120, 1.8, .54], [10, height + .9, 153.73]), box([.54, 1.8, 19.73], [169.73, height + .9, 67.865]),
     box([19.73, 1.8, .54], [59.865, height + .9, -17.73]), box([.54, 1.8, 95.41], [-49.6, height + .9, 105.755])];
   place('reserved-district-ground', 'districtGround', [0, 0, 0], { slabs, edges }, [...slabs, ...edges]);
   // 集装箱码头: 低岸线, 作业台地, 箱顶与仓库夹层; 独立模型共用以下尺寸和实体支撑.
@@ -342,6 +342,264 @@
   regionPlan.corners[3].routes = { stairs: stairRoutes, rails: accessRailRuns,
     ladders: climbRoutes.map(l => ({ ...l, bottom: portWorld(l.bottom), top: portWorld(l.top), exit: portWorld(l.exit) })),
     jumpSteps, quayY: .6, yardY: height, warehouse: [146, height, 42] };
+
+  // 东北海岸小山: 连续岩脊, 两条完整登顶线与东侧栈道捷径; 高度数据同时供网格与通用碰撞使用.
+  const mountainRoot = [120, 0, 116], mountainWorld = ([x, y, z]) => [x + 120, y, z + 116];
+  const mountainStairs = [], mountainRails = [], trailBoxes = [], trailBeams = [], trailCollision = [], trailPosts = new Set(), trailPads = [];
+  function trailBox(size, offset, kind = 'stone') { trailBoxes.push({ ...box(size, offset), kind }); trailCollision.push(box(size, offset)); }
+  function trailRail(a, b) {
+    mountainRails.push({ a: mountainWorld(a), b: mountainWorld(b) });
+    for (const lift of [.55, 1.04]) trailBeams.push({ a: [a[0], a[1] + lift, a[2]], b: [b[0], b[1] + lift, b[2]], radius: .04 });
+    const length = Math.hypot(b[0] - a[0], b[2] - a[2]), count = Math.max(1, Math.ceil(length / 2)), segments = Math.max(1, Math.ceil(Math.abs(b[1] - a[1]) / .7));
+    for (let i = 0; i <= count; i++) {
+      const p = a.map((v, j) => v + (b[j] - v) * i / count), key = p.map(v => v.toFixed(4)).join('/');
+      if (trailPosts.has(key)) continue; trailPosts.add(key);
+      trailBeams.push({ a: [p[0], p[1] + .035, p[2]], b: [p[0], p[1] + 1.07, p[2]], radius: .04 });
+    }
+    for (let i = 0; i < segments; i++) {
+      const p = a.map((v, j) => v + (b[j] - v) * i / segments), q = a.map((v, j) => v + (b[j] - v) * (i + 1) / segments);
+      trailCollision.push(box([Math.abs(q[0] - p[0]) + .12, 1.14 + Math.abs(q[1] - p[1]), Math.abs(q[2] - p[2]) + .12], [(p[0] + q[0]) / 2, Math.min(p[1], q[1]) + .55, (p[2] + q[2]) / 2]));
+    }
+  }
+  function trailStair(id, a, b, width = 3.2, rails = true) {
+    const dx = b[0] - a[0], dz = b[2] - a[2], count = Math.ceil((b[1] - a[1]) / .21), rise = (b[1] - a[1]) / count;
+    for (let i = 0; i < count; i++) {
+      const y = a[1] + (i + 1) * rise, size = dx ? [Math.abs(dx) / count, .65, width] : [width, .65, Math.abs(dz) / count];
+      trailBox(size, [a[0] + dx * (i + .5) / count, y - .325, a[2] + dz * (i + .5) / count]);
+    }
+    if (rails) for (const side of [-1, 1]) {
+      const shift = dx ? [0, 0, side * (width / 2 + .1)] : [side * (width / 2 + .1), 0, 0];
+      trailRail(a.map((v, i) => v + shift[i]), b.map((v, i) => v + shift[i]));
+    }
+    mountainStairs.push({ id, a: mountainWorld(a), b: mountainWorld(b), width, localA: a, localB: b });
+  }
+  function trailPad(id, rect, top, kind = 'stone', fill = true) {
+    const [x0, z0, x1, z1] = rect; trailPads.push({ id, rect, top, fill });
+    const thickness = kind === 'wood' ? .18 : .55;
+    trailBox([x1 - x0, thickness, z1 - z0], [(x0 + x1) / 2, top - thickness / 2, (z0 + z1) / 2], kind);
+    if (kind === 'wood') for (let z = z0 + .35; z < z1; z += 1.8) trailBox([x1 - x0, .22, .14], [(x0 + x1) / 2, top - .29, z], 'wood');
+  }
+  const mountainPaths = [
+    {id:'south-trail',width:3.2,points:[[-12,2.4,-38],[-12,3,-32],[-6,4.3,-28],[2,6.3,-26],[9,8.4,-23],[12,10.5,-17],[10,12.7,-11],[3,14.4,-8],[-4,17,-5],[-7,19.4,1],[-5,21.4,7],[1,22.4,9],[9,24.2,9],[16,24.2,12],[20,24.2,14.4]]},
+    {id:'forest-trail',width:2.8,points:[[-50,2.4,0],[-43,3.6,-3],[-35,5.4,-1],[-30,7.2,5],[-31,9.4,12],[-27,11.8,18],[-21,14.1,20],[-15,16.2,22],[-10,18.6,26],[-4,20.8,28],[2,23,29],[6,24.2,27],[7,24.2,23],[1.8,24.2,22.5],[1.8,24.2,20],[4,24.2,20]]},
+    {id:'coast-trail',width:3,points:[[40,2.4,-38],[39,4,-32],[34,6.4,-26],[30,8.5,-20],[31,11,-13],[37,13.8,-8],[39,15,-1],[33,15,0],[27,15,1.1]]}
+  ];
+  const mountainLinks=[
+    {id:'west-traverse',width:2.6,points:[[-35,5.4,-1],[-30,7.2,5],[-25,7.3,0],[-20,6.6,-9],[-14,4.3,-18],[-6,4.3,-28],[2,6.3,-26]]},
+    {id:'east-traverse',width:2.6,points:[[12,10.5,-17],[16,10.1,-19],[23,9,-21],[30,8.5,-20],[31,11,-13]]}
+  ];
+  const allMountainPaths=[...mountainPaths,...mountainLinks],shapingPaths=[...mountainLinks,...mountainPaths];
+  // 折线转角用短切线圆角, 同一采样同时供地形整形, 地表土径和路线检查使用.
+  for(const path of allMountainPaths) {
+    const source=path.points,rounded=[source[0]],mix=(a,b,t)=>a.map((v,i)=>v+(b[i]-v)*t);
+    for(let i=1;i<source.length-1;i++) {
+      const a=mix(source[i],source[i-1],.46),b=mix(source[i],source[i+1],.46);rounded.push(a);
+      for(let j=1;j<=8;j++){const t=j/8;rounded.push(mix(mix(a,source[i],t),mix(source[i],b,t),t));}
+    }
+    rounded.push(source.at(-1));path.points=rounded;
+  }
+  trailPad('south-step-foot', [18.6,13.4,21.4,14.4], 24.2);
+  trailPad('west-step-foot', [.4,18.5,4,21.5], 24.2);
+  trailPad('east-upper', [24.2,-.8,26,5], 19.8, 'wood', false);
+  trailPad('summit', [8,14,18,23.8], 26.4, 'wood');
+  trailPad('summit-east', [18,20.4,23,23.8], 26.4, 'wood', false);
+  trailPad('east-ladder-foot', [26,-.8,28.4,3], 15);
+  trailPad('cliff-walk', [24, 5, 26.5, 24], 19.8, 'wood', false);
+  trailPad('cliff-turn', [23.4, 20.4, 24, 24], 19.8, 'wood', false);
+  trailStair('south-summit', [20,24.2,14.4], [20,26.4,20.4], 2.8, false);
+  trailStair('west-summit', [4,24.2,20], [8,26.4,20], 2.8, false);
+  // 山顶保留三处入口, 栈道转角闭合; 休息平台用岩石收边, 不围成单入口堡垒.
+  for (const [a, b] of [
+    [[8,26.4,14],[18,26.4,14]], [[8,26.4,14],[8,26.4,18.5]], [[8,26.4,21.5],[8,26.4,23.8]], [[8,26.4,23.8],[23,26.4,23.8]],
+    [[18,26.4,14],[18,26.4,20.4]], [[18,26.4,20.4],[18.3,26.4,20.4]], [[21.7,26.4,20.4],[23,26.4,20.4]],
+    [[23,26.4,20.4],[23,26.4,21.55]], [[23,26.4,22.85],[23,26.4,23.8]],
+    [[26.5,19.8,5],[26.5,19.8,24]], [[23.4,19.8,24],[26.5,19.8,24]], [[24,19.8,5],[24,19.8,19.8]]
+  ]) trailRail(a,b);
+  const mountain = { bounds: [-50,-38,50,38], columns: 101, rows: 77, heights: [], paths:allMountainPaths,
+    grassColors:{fresh:[98,125,65],dry:[135,140,83],shade:[70,102,53]}, soilPatches:[] };
+  const distanceToRect = (x,z,[a,b,c,d]) => Math.hypot(Math.max(a-x,0,x-c),Math.max(b-z,0,z-d));
+  function profileAt(x,z,points,roundHeights=false) {
+    let distance=Infinity,top=2.4;
+    for(let i=1;i<points.length;i++) {
+      const a=points[i-1],b=points[i],dx=b[0]-a[0],dz=b[2]-a[2],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[2])*dz)/(dx*dx+dz*dz)));
+      const d=Math.hypot(x-a[0]-dx*t,z-a[2]-dz*t);if(d<distance){distance=d;const along=roundHeights?t*t*(3-2*t):t;top=a[1]+(b[1]-a[1])*along;}
+    }
+    return {distance,top};
+  }
+  // 岩脊加宽草坡肩以留出横走空间, 峰顶高程平滑收坡; 道路仍按直线插值保持可走坡度.
+  const mountainRidges=[
+    {width:21,points:[[-20,14,-9],[-15,24,7],[-10,34,17],[-7,28,23],[-18,12,33]]},
+    {width:19,points:[[-42,7.8,5],[-28,13.4,12],[-18,17,22],[-10,22,24]]},
+    {width:18,points:[[13,16,4],[27,22,7],[36,18,20],[45,8,31]]}
+  ];
+  function mountainHeight(x,z) {
+    let y=2.4;
+    for(const ridge of mountainRidges){const p=profileAt(x,z,ridge.points,true);y=Math.max(y,2.4+(p.top-2.4)*Math.exp(-2*(p.distance/ridge.width)**2));}
+    const relief=.65*Math.sin(x*.19+z*.13)+.35*Math.cos(z*.27-x*.09);
+    const gully=1.9*Math.exp(-(((x+9-z*.22)/4.2)**2))*Math.exp(-(((z+6)/17)**2));
+    y=2.4+(y-2.4+Math.min(1,(y-2.4)/5)*(relief-gully))*Math.min(1,Math.max(0,Math.min(x+50,z+38)/7));
+    // 土径只整理脚下缓坡, 外缘以宽坡肩渐变; 平台整形限制在少量实际构筑物周围.
+    for(const path of shapingPaths) {
+      const p=profileAt(x,z,path.points),weight=Math.max(0,Math.min(1,1-(p.distance-path.width/2-1.8)/3.5));
+      y+=(p.top-y)*weight*weight*(3-2*weight);
+    }
+    for (const p of trailPads) if (p.fill) {
+      const distance = distanceToRect(x,z,p.rect), weight = Math.max(0,1-distance/3.5); y += (p.top-.28-y)*weight*weight*(3-2*weight);
+    }
+    let carved = Infinity;
+    for (const p of trailPads) if (distanceToRect(x,z,p.rect) <= .05)
+      carved = Math.min(carved,p.fill?p.top-.38:Math.min(y,p.top-.38));
+    for (const route of mountainStairs) {
+      const a=route.localA,b=route.localB,dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz),t=((x-a[0])*dx+(z-a[2])*dz)/(length*length);
+      const across=Math.abs((x-a[0])*dz-(z-a[2])*dx)/length;
+      const distance=Math.hypot(Math.max(0,-t*length,(t-1)*length),Math.max(0,across-route.width/2));
+      const target=a[1]+(b[1]-a[1])*Math.max(0,Math.min(1,t))-.38,weight=Math.max(0,1-Math.max(0,distance-.8)/2.8);
+      y+=(target-y)*weight*weight*(3-2*weight);
+      if(distance<=.8)carved=Math.min(carved,target);
+    }
+    // 通道余量覆盖脚底采样及相邻网格, 避免路边三角面和平台整形产生隐形陡坎.
+    for(const path of shapingPaths){
+      const p=profileAt(x,z,path.points),weight=Math.max(0,Math.min(1,1-(p.distance-path.width/2-1.8)));
+      y+=(p.top-y)*weight*weight*(3-2*weight);
+    }
+    return Math.max(2.4,Math.min(carved,y));
+  }
+  for (let j=0;j<mountain.rows;j++) for (let i=0;i<mountain.columns;i++) mountain.heights.push(mountainHeight(i-50,j-38));
+  mountain.exclusions = [...trailPads.map(p=>p.rect),...mountainStairs.map(({localA:a,localB:b,width:w})=>[Math.min(a[0],b[0])-w/2-.5,Math.min(a[2],b[2])-w/2-.5,Math.max(a[0],b[0])+w/2+.5,Math.max(a[2],b[2])+w/2+.5])];
+  const mountainSample = (x,z) => {
+    const u=Math.max(0,Math.min(100,x+50)),v=Math.max(0,Math.min(76,z+38)),i=Math.min(99,Math.floor(u)),j=Math.min(75,Math.floor(v)),a=u-i,b=v-j,k=j*101+i,h=mountain.heights;
+    return a+b<=1 ? h[k]+a*(h[k+1]-h[k])+b*(h[k+101]-h[k]) : h[k+102]+(a-1)*(h[k+102]-h[k+101])+(b-1)*(h[k+102]-h[k+1]);
+  };
+  const mountainBoundary = [box([100,1.8,.5],[0,3.3,37.75]),box([.5,1.8,76],[49.75,3.3,0])];
+  mountain.walls = [];
+  // 外侧用接边山脊延续轮廓, 不画矩形矮墙; 原边界约束仍防止从制高点跃出可玩范围.
+  place('mountain-terrain','coastalMountain',mountainRoot,mountain,[{ ...box([100,36,76],[0,17.4,0]),heightfield:{columns:101,rows:77,heights:mountain.heights,maxSlope:1}},...mountainBoundary.map(b=>box([b.size[0],40,b.size[2]],[b.offset[0],19.4,b.offset[2]]))]);
+  // 栈道立柱落到实际坡面, 只主体和横栏参与碰撞; 不对每条木纹/砌石生成实体.
+  const cliffSupports=[...[[18.8,21,26.4],[22.6,23.8,26.4]],...[7,13,19,23.5].flatMap(z=>[24.3,26.1].map(x=>[x,z,19.8]))];
+  for (const [x,z,top] of cliffSupports) {
+    const bottom=mountainSample(x,z)-.25,head=top-.18;
+    if(head-bottom>.4) {
+      trailBox([.22,head-bottom,.22],[x,(bottom+head)/2,z],'wood');
+      // 斜撑和连接片位于楼板下方, 射击使用实面, 身体以主体柱简化阻挡.
+      const direction=x<25?1:-1,span=Math.min(1.25,(head-bottom)*.55);
+      trailBeams.push({a:[x,head-span-.08,z],b:[x+direction*span*.8,head-.08,z],radius:.065,kind:'wood'});
+      trailBoxes.push({...box([.3,.28,.035],[x,head-.38,z-.12]),kind:'leg'});
+    }
+  }
+  const trailFootings=[];
+  // 山顶只保留一块局部木屏, 主要掩体交给坡肩和出露岩脊, 不截断主路.
+  const mountainCover=[{position:[16.4,26.4,23.52],size:[2.6,1.04,.24],kind:'wood'}];
+  for(const p of mountainCover) {
+    const [w,h,d]=p.size,[x,y,z]=p.position;trailBox([w,h+.08,d],[x,y+(h-.08)/2,z],p.kind??'stone');
+    trailBox([w+.08,.09,d+.06],[x,y+h+.045,z],p.kind??'stone');
+  }
+  function trailFooting(a,b,width=.2) {
+    const count=Math.ceil(Math.hypot(b[0]-a[0],b[2]-a[2])/2.5);
+    for(let i=0;i<count;i++) {
+      const p=a.map((v,j)=>v+(b[j]-v)*i/count),q=a.map((v,j)=>v+(b[j]-v)*(i+1)/count);
+      trailFootings.push({a:p,b:q,width,bottom:[p,q].map(v=>Math.min(v[1]-.65,mountainSample(v[0],v[2])-.24))});
+    }
+  }
+  for(const {localA:a,localB:b,width:w} of mountainStairs) for(const side of [-1,1]) {
+    const shift=b[0]!==a[0]?[0,-.2,side*(w/2-.07)]:[side*(w/2-.07),-.2,0];
+    trailFooting(a.map((v,i)=>v+shift[i]),b.map((v,i)=>v+shift[i]),.16);
+  }
+  for(const {rect:[a,b,c,d],top,fill} of trailPads) if(fill) {
+    const y=top-.17;for(const [p,q] of [[[a+.05,y,b+.05],[c-.05,y,b+.05]],[[c-.05,y,b+.05],[c-.05,y,d-.05]],
+      [[c-.05,y,d-.05],[a+.05,y,d-.05]],[[a+.05,y,d-.05],[a+.05,y,b+.05]]]) trailFooting(p,q);
+  }
+  // 路裙只封闭原路面实体下方, 身体仍由踏步/坡面支撑; 不增加逐小块碰撞.
+  place('mountain-trails','mountainTrails',mountainRoot,{boxes:trailBoxes,beams:trailBeams,footings:trailFootings},trailCollision);
+  const mountainLadders=[{position:[26.6,15,1.1],height:4.8,width:.9,yaw:Math.PI/2,mountDepth:.6,returnDepth:.72},
+    {position:[23.6,19.8,22.2],height:6.6,width:.9,yaw:Math.PI/2,mountDepth:.6,returnDepth:.72}];
+  const mountainClimbs=mountainLadders.map(l=>{const top=[l.position[0],l.position[1]+l.height,l.position[2]],normal=[1,0,0];return {bottom:l.position,top,normal,width:l.width,exit:[top[0]-.85,top[1],top[2]]};});
+  place('mountain-ladders','verticalLadder',mountainRoot,{ladders:mountainLadders},mountainLadders.flatMap(l=>[-1,1].map(side=>facadeBox([.16,l.height+1.14,.92],{position:l.position,yaw:l.yaw},[side*l.width/2,(l.height+1.14)/2,-.36]))));
+  instances.at(-1).traversal={ladders:mountainClimbs};
+  const mountainStones=[[-10,12,10,2.5,4],[-1,16,12,3.6,4],[19,6,7.5,2.8,3.8],[-23,9,6,1.7,3.8],
+    [-36,23,5,1.5,4],[-23,-20,6.2,1,4.6],[29,-5,5,1.5,3.4],[14,30,8.5,2.1,4],[42,25,5.8,1.4,5.2],[-43,10,4.8,1.2,3.6],[43,-23,4,1.2,3],[-19,-2.6,3.6,1.6,2.8],[20,-15.5,3.6,1.7,2.8]]
+    .map(([x,z,w,h,d])=>{
+      const base=Math.min(...[-.48,0,.48].flatMap(a=>[-.48,0,.48].map(b=>mountainSample(x+a*w,z+b*d))))-.28;
+      return {position:[x,base,z],size:[w,mountainSample(x,z)+h-base,d]};
+    });
+  // 岔路内侧留出换线节点, 前方坡肩/出露岩层提供局部遮挡, 不增建围墙.
+  const mountainNodes=mountainLinks.map((path,i)=>{
+    const target=i?[21,-20]:[-22,-5],point=path.points.reduce((a,b)=>
+      Math.hypot(a[0]-target[0],a[2]-target[1])<Math.hypot(b[0]-target[0],b[2]-target[1])?a:b);
+    return {id:i?'east-shoulder':'west-hollow',path:path.id,position:[point[0],mountainSample(point[0],point[2]),point[2]],rock:11+i};
+  });
+  const rockCollision=mountainStones.map(p=>box([p.size[0]*.76,p.size[1]*.88,p.size[2]*.76],[p.position[0],p.position[1]+p.size[1]*.44,p.position[2]]));
+  const scree=[];let rockSeed=217;const rockRandom=()=>((rockSeed=(Math.imul(rockSeed,1664525)+1013904223)>>>0)/4294967296);
+  for(const stone of mountainStones)for(let i=0;i<9;i++) {
+    const a=rockRandom()*Math.PI*2,r=.5+rockRandom()*.65,x=stone.position[0]+Math.cos(a)*stone.size[0]*r,z=stone.position[2]+Math.sin(a)*stone.size[2]*r;
+    if(x<-49||x>49||z<-37||z>37||allMountainPaths.some(p=>profileAt(x,z,p.points).distance<p.width/2+.8)||mountain.exclusions.some(rect=>distanceToRect(x,z,rect)<.8))continue;
+    const w=.25+rockRandom()*.55;scree.push({position:[x,mountainSample(x,z)-.12,z],size:[w,.18+rockRandom()*.3,w*(.65+rockRandom()*.4)]});
+  }
+  mountain.soilPatches.push(...mountainStones.map(({position:[x,,z],size:[w,,d]})=>({center:[x,z],radius:[w*.85,d*.85],strength:.82})),
+    {center:[-4,31],radius:[6,3.4],strength:.68},{center:[37,21],radius:[4.3,6],strength:.62});
+  place('mountain-rocks','mountainRocks',mountainRoot,{stones:mountainStones,scree},rockCollision);
+  const trailMarkers=[[-14.5,-36,0],[-9.5,-36,0],[-49,-3.2,Math.PI/2],[-49,3.2,Math.PI/2],[37.8,-36,0],[42.2,-36,0]]
+    .map(([x,z,yaw],i)=>({position:[x,mountainSample(x,z),z],yaw,slot:i%2===0?0:undefined}));
+  const trailFurniture={weathered:true,trailMap:allMountainPaths.map((p,i)=>({points:p.points,color:['#e2c990','#b9d0ac','#a7c7d0','#c2afa2','#c2afa2'][i]})),
+    labels:[['海望山','COASTAL HILL / 03'],['山頂登山道','SUMMIT / SOUTH ROUTE'],['林間の登山道','SUMMIT / FOREST ROUTE'],['山頂展望台','SUMMIT / 26.4 M'],['海岸と港','COAST & TERMINAL'],['竪梯子 ↑','LADDER / SHORTCUT'],['登山道案内','TRAIL MAP'],['岩壁の桟道','CLIFF WALK']],
+    markers:trailMarkers,benches:[{position:[14,26.4,22.5],yaw:Math.PI}],
+    shelters:[{position:[13,26.4,16.8],width:4.2,depth:2.8,height:2.55,kind:'lookout',roofPitch:.24}],
+    scopes:[{position:[10.2,26.4,22.8],yaw:Math.PI}],
+    signs:[{position:[-17,mountainSample(-17,-35),-35],slot:0,width:1.6},
+      {position:[-46,mountainSample(-46,-5.5),-5.5],slot:6,width:1.6,height:2.1,yaw:Math.PI/2},
+      {position:[29,15,2.4],slot:5,width:1.2,height:2.1}],cabinets:[]};
+  function trailFurnitureSolids(s) {
+    return [...(s.planters??[]).map(p=>box(p.size,[p.position[0],p.position[1]+p.size[1]/2,p.position[2]])),
+      ...(s.benches??[]).map(p=>facadeBox([p.width??2.1,.9,.6],{position:p.position,yaw:p.yaw??0},[0,.45,0])),
+      ...(s.cabinets??[]).map(p=>box([p.size[0]+.08,p.size[1]+.06,p.size[2]+.12],[p.position[0],p.position[1]+p.size[1]/2,p.position[2]+.03])),
+      ...(s.scopes??[]).map(p=>facadeBox([.7,1.5,.85],{position:p.position,yaw:p.yaw??0},[0,.75,-.1])),
+      ...(s.markers??[]).map(p=>box([(p.width??.52)+.08,(p.height??1.3)+.1,(p.width??.52)+.08],[p.position[0],p.position[1]+((p.height??1.3)+.1)/2,p.position[2]])),
+      ...(s.signs??[]).flatMap(p=>{const w=p.width??2.1,h=p.height??2.5,face={position:p.position,yaw:p.yaw??0};return [
+        ...[-1,1].map(x=>facadeBox([.09,h,.09],face,[x*w*.36,h/2,0])),
+        facadeBox([w,p.panelHeight??.7,.14],face,[0,h-.37,.04]),facadeBox([w+.2,.08,.36],face,[0,h+.1,.035])];}),
+      ...(s.shelters??[]).flatMap(p=>{const w=p.width,d=p.depth,h=p.height??2.7,rise=p.kind==='lookout'?Math.tan(p.roofPitch??.24)*w/2:0;
+        return [...[-1,1].flatMap(x=>[-1,1].map(z=>facadeBox([.3,h,.3],{position:p.position,yaw:p.yaw??0},[x*(w/2-.12),h/2,z*(d/2-.12)]))),
+          facadeBox([w+(rise?.84:.38),rise+.38,d+(rise?.7:.44)],{position:p.position,yaw:p.yaw??0},[0,h+.04+rise/2,0]),
+          ...(['pavilion','lookout'].includes(p.kind)?[facadeBox([w-.3,.52,.18],{position:p.position,yaw:p.yaw??0},[0,.26,-d/2+.12]),facadeBox([1.65,2.6,.2],{position:p.position,yaw:p.yaw??0},[w/2-1.1,1.3,-d/2+.12])]:[])];})];
+  }
+  place('mountain-rest-facilities','trailFacilities',mountainRoot,trailFurniture,trailFurnitureSolids(trailFurniture));
+  // 三个疏密不同的林群围住山麓与沟谷, 给中坡留出草坡和射击窗口.
+  const treeCandidates=[[-44,-27],[-38,-29],[-33,-25],[-43,-20],[-32,-32],[-39,-13],[-26,-26],
+    [-43,3],[-39,9],[-36,15],[-44,18],[-40,28],[-30,28],[-25,32],[-21,5],[-18,1],
+    [22,-25],[25,-20],[20,-17],[27,-13],[44,-18],[43,-8],[44,7],[40,15],[37,29],[29,32],[20,32]];
+  const mountainTrees=treeCandidates.filter(([x,z])=>!allMountainPaths.some(p=>profileAt(x,z,p.points).distance<p.width/2+1.25)&&
+    !mountainStones.some(s=>Math.abs(x-s.position[0])<s.size[0]/2+1&&Math.abs(z-s.position[2])<s.size[2]/2+1));
+  const woodlandTrees=mountainTrees.map(([x,z],i)=>{
+    const kind=i%3===0?'pine':'broadleaf',scale=kind==='pine'?1.05+(i%5)*.07:.78+(i%5)*.09;
+    const y=Math.min(...[-.22,0,.22].flatMap(a=>[-.22,0,.22].map(b=>mountainSample(x+a*scale,z+b*scale))))-.025;
+    return {position:[x,y,z],scale,kind,yaw:i*.67,seed:930+i};
+  });
+  place('mountain-woodland','mountainWoodland',mountainRoot,{trees:woodlandTrees},woodlandTrees.map(t=>
+    box([.48*t.scale,3*t.scale,.48*t.scale],[t.position[0],t.position[1]+1.5*t.scale,t.position[2]])));
+  mountain.woodland=mountainTrees.map(([x,z])=>[x,z,3.4]);
+  mountain.soilPatches.push(...mountainTrees.map(([x,z])=>({center:[x,z],radius:[2.5,2.1],strength:.74})));
+  // 背景只在东北区域外侧延续山势, 与可玩山体边界取相同剖面; 不新增身体或射线碰撞.
+  place('mountain-distant-ridges','coastalRidges',mountainRoot,{...mountain,relief:.68,north:mountain.heights.slice(-101),east:Array.from({length:77},(_,j)=>mountain.heights[j*101+100])});
+  const mountainPlants={...mountain,exclusions:[...mountain.exclusions,...mountainStones.map(({position:[x,,z],size:[w,,d]})=>[x-w/2,z-d/2,x+w/2,z+d/2])]};
+  place('mountain-litter','mountainLitter',mountainRoot,{...mountainPlants,trees:woodlandTrees});
+  place('mountain-grass','mountainGrass',mountainRoot,{...mountainPlants,spacing:.43,maxShort:8500,maxTall:400});
+  place('mountain-groundcover','mountainGroundcover',mountainRoot,{...mountainPlants,
+    zones:[...mountainTrees.map(([x,z])=>({kind:'fern',center:[x,z],radius:4.1,count:13})),
+      ...[[-35,-17],[-16,-17],[18,-5],[-23,29],[37,23],[9,30]].map(center=>({kind:'scrub',center,radius:4,count:18})),
+      ...[[-31,-28],[18,-28],[-44,-10],[43,-10],[40,26],[-26,31]].map(center=>({kind:'flower',center,radius:3,count:12}))]});
+  regionPlan.corners[2].routes={paths:mountainPaths.map(p=>({...p,points:p.points.map(mountainWorld)})),links:mountainLinks.map(p=>({...p,points:p.points.map(mountainWorld)})),nodes:mountainNodes.map(n=>({...n,position:mountainWorld(n.position)})),ridges:mountainRidges.map(p=>({...p,points:p.points.map(mountainWorld)})),summitY:26.4,peakY:Math.max(Math.max(...mountain.heights),...mountainStones.map(s=>s.position[1]+s.size[1])),stairs:mountainStairs.map(({localA,localB,...r})=>r),rails:mountainRails,
+    cover:mountainCover.map(p=>({...p,position:mountainWorld(p.position)})),
+    ladders:mountainClimbs.map(l=>({...l,bottom:mountainWorld(l.bottom),top:mountainWorld(l.top),exit:mountainWorld(l.exit)})),
+    approaches:[['south-trail','south-summit'],['forest-trail','west-summit'],['coast-trail']]};
+  // 中央广场保留独立铺地与错位树池, 使用通用步道设施, 与山体模型分离.
+  const squareSlabs=[box([20,3,20],[0,.9,0])];
+  place('central-paving','terraceGround',[60,0,68],{bounds:[-10,-10,10,10],slabs:squareSlabs,surfaces:[{rect:[-10,-10,20,20],kind:'stone'}]},squareSlabs);
+  const square={planters:[{position:[-6,2.4,2],size:[3.4,.72,4]},{position:[5.8,2.4,-2.5],size:[3.4,.72,4]}],
+    shelters:[{position:[0,2.4,6],width:5.6,depth:3.2,height:3,kind:'pavilion'}],benches:[{position:[-6,2.4,-.7]},{position:[0,2.4,6]}],signs:[{position:[7.5,2.4,6.2],slot:1,width:2.2,height:2.5}]};
+  place('central-facilities','trailFacilities',[60,0,68],square,trailFurnitureSolids(square));
+  for(const[i,p]of square.planters.entries()) {
+    place('central-tree-'+i,'zelkovaTree',[60+p.position[0],2.96,68+p.position[2]],{seed:850+i},[box([.48,3,.48],[0,1.5,0])]);
+    place('central-shrub-'+i,'lowHedge',[60+p.position[0],2.96,68+p.position[2]],{width:2.95,depth:3.55,height:.6,dense:true,natural:true,seed:861+i});
+  }
 
   // 西北公园: 南北参道, 西侧园林, 东侧湖面与北侧拜殿; 环路与东侧出口不封闭.
   const parkY = height + .024;
@@ -899,6 +1157,8 @@
       portReachstacker: 'models/port-reachstacker.js', portForklift: 'models/port-forklift.js', portTerminalTractor: 'models/port-terminal-tractor.js',
       portCargoWorkarea: 'models/port-cargo-workarea.js', portService: 'models/port-service.js',
       portUtilities: 'models/port-utilities.js', verticalLadder: 'models/vertical-ladder.js',
+      coastalMountain: 'models/coastal-mountain.js', coastalRidges: 'models/coastal-ridges.js', mountainRocks: 'models/mountain-rocks.js', mountainGroundcover: 'models/mountain-groundcover.js', mountainWoodland: 'models/mountain-woodland.js', mountainGrass: 'models/mountain-grass.js', mountainLitter: 'models/mountain-litter.js',
+      mountainTrails: 'models/mountain-trails.js', trailFacilities: 'models/trail-facilities.js', terraceGround: 'models/terrace-ground.js',
       portWarehouse: 'models/port-warehouse.js', portCrane: 'models/port-crane.js', cargoShip: 'models/cargo-ship.js', portFixtures: 'models/port-fixtures.js',
       parkTerrain: 'models/park-terrain.js', parkTrailStones: 'models/park-trail-stones.js',
       parkGroundcover: 'models/park-groundcover.js',
