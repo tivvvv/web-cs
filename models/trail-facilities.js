@@ -224,11 +224,14 @@ FPS.models.trailFacilities = (T, o = {}) => {
   }
   for (const board of o.signs ?? []) {
     setPose(board.position, board.yaw ?? 0); const w = board.width ?? 2.1, h = board.height ?? 2.5;
-    for (const x of [-w * .36, w * .36]) box([.09, h, .09], [x, h / 2, 0], 0x5e7b6d);
+    for (const [i,x] of [-w * .36, w * .36].entries()) {
+      const bottom=board.postBottoms?.[i]??0;
+      box([.09,h-bottom,.09],[x,(h+bottom)/2,0],0x5e7b6d);
+      if(o.weathered) box([.22,.12,.22],[x,bottom+.06,0],0xaaab96,2);
+    }
     sign([w, board.panelHeight ?? .7, .14], [0, h - .37, .04], board.slot ?? 0);
     box([w + .2, .08, .36], [0, h + .1, .035], 0x718778);
     if(o.weathered)for(const x of [-w*.36,w*.36]) {
-      box([.22,.12,.22],[x,.06,0],0xaaab96,2);
       box([.09,.08,.09],[x,h+.03,0],0x5e7b6d);
       for(const y of [h-.56,h-.2])bolt([x,y,.12]);
     }

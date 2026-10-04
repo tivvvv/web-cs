@@ -20,8 +20,10 @@ const before = vm.createContext({ window: {} });
 vm.runInContext(execFileSync('git', ['show', 'HEAD:scene-kamakura.js'], { encoding: 'utf8' }), before);
 const json = value => JSON.stringify(value);
 for (const old of before.window.FPS_LAYOUT.instances) {
-  if (old.id.startsWith('port-') || ['reserved-district-ground', 'sagami-bay', 'coastal-beach'].includes(old.id)) continue;
-  assert.equal(json(layout.instances.find(i => i.id === old.id)), json(old), old.id + ' 被意外修改');
+  // 山区改动由 mountain/mountain-detail 回归覆盖, 此处保护车站/公园/连接区.
+  if (old.id.startsWith('port-') || old.id.startsWith('mountain-') || ['reserved-district-ground', 'sagami-bay', 'coastal-beach'].includes(old.id)) continue;
+  const current = layout.instances.find(i => i.id === old.id);
+  assert.equal(json(current), json(old), old.id + ' 被意外修改');
 }
 assert.equal(new Set(layout.instances.map(i => i.id)).size, layout.instances.length);
 assert.equal(layout.regionPlan.corners[3].status, 'developed');

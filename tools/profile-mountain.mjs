@@ -10,7 +10,7 @@ vm.runInContext(`
  const player={position:new T.Vector3(),debug:false};player.body={root:player,radius:.32,height:1.75,vy:0,grounded:false};
  let yaw=0,pitch=0,walk=0,weapon,renderEffect;const api={spawn:new T.Vector3()},$=id=>hints[id]??={};
  ${html.slice(html.indexOf('const STEP_HEIGHT'),html.indexOf('function separateBodies()'))}
- ${html.slice(html.indexOf('function createInstance(data)'),html.indexOf('function toggleEnemies()'))}
+ ${html.slice(html.indexOf('function createInstance('),html.indexOf('function toggleEnemies()'))}
  ${html.slice(html.indexOf('function updatePlayer(dt)'),html.indexOf('function showMenu('))}
  FPS.models.collisionOnly=()=>({root:new T.Group()});
  globalThis.test={solid,player,keys,createInstance,fall,updatePlayer,stepView,aim:(x,z)=>yaw=Math.atan2(-x,-z)};

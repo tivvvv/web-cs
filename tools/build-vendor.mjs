@@ -11,7 +11,7 @@ await build({
     IcosahedronGeometry, TorusGeometry, Shape, Path, ShapeGeometry, ExtrudeGeometry,
     MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, ShaderMaterial,
     LineBasicMaterial, CanvasTexture, DataTexture, DepthTexture, HalfFloatType, UnsignedIntType, RepeatWrapping, BackSide, LinearFilter, LinearMipmapLinearFilter,
-    SRGBColorSpace, EquirectangularReflectionMapping, ACESFilmicToneMapping, PCFSoftShadowMap, DoubleSide, ShaderChunk
+    SRGBColorSpace, EquirectangularReflectionMapping, ACESFilmicToneMapping, PCFSoftShadowMap, FrontSide, DoubleSide, NearestFilter, RedFormat, ShaderChunk
   } from 'three';
   export { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
   export { Reflector } from 'three/addons/objects/Reflector.js';`, resolveDir: process.cwd() },

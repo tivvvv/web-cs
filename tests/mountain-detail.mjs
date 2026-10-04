@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { ShaderLib } from 'three';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const document={createElement(){const ctx={createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(p){this.pixels=p;}};
   for(const name of ['setTransform','fillRect','fillText','beginPath','moveTo','lineTo','stroke'])ctx[name]=()=>{};
@@ -10,6 +11,37 @@ const context=vm.createContext({FPS:{models:{}},document,AbortController});vm.ru
 const T=context.THREE;
 function create(name,file,options){vm.runInContext(read('models/'+file+'.js'),context);return context.FPS.models[name](T,options);}
 function release(model){const geometries=new Set(),materials=new Set();model.root.traverse(m=>{if(m.isMesh){geometries.add(m.geometry);materials.add(m.material);}});model.dispose?.();geometries.forEach(g=>g.dispose());materials.forEach(m=>m.dispose());}
+// 草土/陡壁共享顶点必须共享投影权重, 两个细节图的重复边界必须连续.
+const surfaceModel=create('coastalMountain','coastal-mountain',{bounds:[-2,-2,2,2],columns:3,rows:3,heights:[2,2,2,2,2.5,3,2,4,6]});
+const surfaceMeshes=surfaceModel.root.children;assert.equal(surfaceMeshes.length,2);
+const surfaceShared=new Map(),surfaceShaders=[];let joins=0;
+for(const mesh of surfaceMeshes) {
+ const p=mesh.geometry.attributes.position,n=mesh.geometry.attributes.normal,mix=mesh.geometry.attributes.rockMix;
+ assert(mix&&!mesh.geometry.attributes.uv1&&mix.count===p.count);
+ for(let i=0;i<p.count;i++) {
+  const key=[p.getX(i),p.getY(i),p.getZ(i)].join('/'),values=[n.getX(i),n.getY(i),n.getZ(i),mix.getX(i)];
+  assert(values.every(Number.isFinite)&&mix.getX(i)>=0&&mix.getX(i)<=1);
+  if(p.getY(i)<2||p.getX(i)===-2||p.getX(i)===2||p.getZ(i)===-2||p.getZ(i)===2)continue;
+  if(surfaceShared.has(key)){assert.deepEqual(values,surfaceShared.get(key),'共享顶点法线/岩土权重产生接缝');joins++;}else surfaceShared.set(key,values);
+ }
+ const shader={uniforms:{},vertexShader:ShaderLib.standard.vertexShader,fragmentShader:ShaderLib.standard.fragmentShader};
+ mesh.material.onBeforeCompile(shader);surfaceShaders.push(shader);
+ assert(shader.vertexShader.includes('modelMatrix*vec4(transformed,1.)')&&shader.vertexShader.includes('inverseTransformDirection(transformedNormal,viewMatrix)'),'米制纹理没有使用真实模型变换/坡面法线');
+ assert.equal((shader.fragmentShader.match(/texture2D\(mountainRockDetail/g)??[]).length,3);
+ assert.equal((shader.fragmentShader.match(/texture2D\(mountainSoilDetail/g)??[]).length,1,'细节采样预算增加');
+ assert(shader.fragmentShader.includes('dFdx(mountainBump)')&&!shader.fragmentShader.includes('#include <normal_fragment_maps>'));
+}
+assert(joins>0);assert.equal(surfaceShaders[0].vertexShader,surfaceShaders[1].vertexShader);assert.equal(surfaceShaders[0].fragmentShader,surfaceShaders[1].fragmentShader);
+for(const uniform of ['mountainSoilDetail','mountainRockDetail']) {
+ const map=surfaceShaders[0].uniforms[uniform].value;assert(map===surfaceShaders[1].uniforms[uniform].value&&map.generateMipmaps&&map.anisotropy===8);
+ const {width:n,ctx}=map.image,pixels=ctx.pixels.data;let minimum=255,maximum=0;
+ for(let i=0;i<n;i++)for(let channel=0;channel<3;channel++) {
+  assert(Math.abs(pixels[(i*n)*4+channel]-pixels[(i*n+n-1)*4+channel])<=1,'纹理左右重复接缝');
+  assert(Math.abs(pixels[i*4+channel]-pixels[((n-1)*n+i)*4+channel])<=1,'纹理上下重复接缝');
+ }
+ for(let i=0;i<pixels.length;i+=4){minimum=Math.min(minimum,pixels[i]);maximum=Math.max(maximum,pixels[i]);}assert(maximum-minimum>25,'近景细节缺少有效凹凸');
+}
+release(surfaceModel);console.log('PASS 山壁连续三向米制投影/草土共享权重/周期纹理接边/四次细节采样预算');
 const field={bounds:[-4,-4,4,4],columns:3,rows:3,heights:[3,3,3,3,3.6,3,3,3,3],spacing:.35,maxShort:400,maxTall:0};
 function height(x,z){const u=Math.max(0,Math.min(2,(x+4)/4)),v=Math.max(0,Math.min(2,(z+4)/4)),i=Math.min(1,Math.floor(u)),j=Math.min(1,Math.floor(v)),a=u-i,b=v-j,k=j*3+i,h=field.heights;
  return a+b<=1?h[k]+a*(h[k+1]-h[k])+b*(h[k+3]-h[k]):h[k+4]+(a-1)*(h[k+4]-h[k+3])+(b-1)*(h[k+4]-h[k+1]);}
@@ -35,13 +67,48 @@ assert(smooth>100&&hard>0,'岩石应同时保留平滑风化和断面折角');
 const rc=rockGeometry.attributes.color;let lower=0,upper=0,nl=0,nu=0;for(let i=0;i<rp.count;i++){if(rp.getY(i)<3){lower+=rc.getY(i);nl++;}if(rp.getY(i)>6){upper+=rc.getY(i);nu++;}}assert(lower/nl<upper/nu,'坡脚没有形成泥土接触色');
 assert(rockMesh.material.bumpScale<.03&&rockMesh.material.bumpMap.generateMipmaps);release(rock);
 console.log('PASS 岩石受光平滑/断面折角/外形尺寸');
+const screeField={bounds:[-2,-2,2,2],columns:3,rows:3,heights:[3.4,4,4.2,3.4,3.9,4.2,3.4,3.6,4.2]};
+const pebble=create('mountainRocks','mountain-rocks',{...screeField,scree:[{position:[0,3.9-.38*.6,0],size:[1.2,.38,.9]}]}),pebbleMesh=pebble.root.children[0];
+const originalPebble=new T.IcosahedronGeometry(1,1),pp=pebbleMesh.geometry.attributes.position,op=originalPebble.attributes.position;
+function screeHeight(x,z){const u=Math.max(0,Math.min(2,(x+2)/2)),v=Math.max(0,Math.min(2,(z+2)/2)),i=Math.min(1,Math.floor(u)),j=Math.min(1,Math.floor(v)),a=u-i,b=v-j,k=j*3+i,h=screeField.heights;
+ return a+b<=1?h[k]+a*(h[k+1]-h[k])+b*(h[k+3]-h[k]):h[k+4]+(a-1)*(h[k+4]-h[k+3])+(b-1)*(h[k+4]-h[k+1]);}
+let exposed=0;assert.equal(pp.count/3,80);assert.equal(pebble.root.children.length,1);
+for(let i=0;i<pp.count;i++){const clearance=pp.getY(i)-screeHeight(pp.getX(i),pp.getZ(i));if(op.getY(i)<=0)assert(clearance<=-.0179,'碎石下半圈没有埋入跨网格坡面');if(clearance>.015)exposed++;}
+assert(exposed>0,'碎石被整体藏入地面');originalPebble.dispose();release(pebble);
+console.log('PASS 扁碎石下半圈跨网格贴坡/外露上半圈/单网格预算');
 const woods=create('mountainWoodland','mountain-woodland',{trees:[{position:[-2,3,-2],kind:'pine',scale:1,seed:73},{position:[2,3,2],kind:'broadleaf',scale:1,seed:91}]}),canopies=woods.root.children.filter(m=>m.isInstancedMesh);
 assert.equal(canopies.reduce((n,m)=>n+m.count,0),1550,'树冠迭代增加叶片预算');assert(canopies.every(m=>Number.isFinite(m.boundingSphere.radius)));
+assert(canopies.every(m=>!m.receiveShadow),'细叶不能接收粗粒度自阴影');
+const detailCanopy=canopies.find(m=>m.name==='mountain-canopy-detail'),fullDetail=detailCanopy.count;
+woods.update(1/60,{player:{position:detailCanopy.boundingSphere.center.clone().add(new T.Vector3(65,0,0))}});
+assert.equal(detailCanopy.count,fullDetail,'中距离不能逐帧删除细叶实例');
+assert(canopies.every(m=>m.geometry.attributes.canopyDetail.array.every(v=>v===(m.name==='mountain-canopy-detail'?1:0))),'两层树冠减量标记不一致');
 woods.root.updateWorldMatrix(true,true);const trunk=woods.root.children.find(m=>m.name==='mountain-tree-trunks'),ray=new T.Raycaster(new T.Vector3(-1,4,-2),new T.Vector3(-1,0,0),0,2),actual=ray.intersectObject(trunk),reference=[];
 T.Mesh.prototype.raycast.call(trunk,ray,reference);assert(actual.length>0&&actual.length===reference.length,'树冠改形损坏树干射线范围');
 for(let i=0;i<180;i++)woods.update(1/60,{player:{position:new T.Vector3(800,30,800)}});
 assert(canopies.filter(m=>m.name==='mountain-canopy-detail').every(m=>m.count===0));release(woods);
 console.log('PASS 混合林叶片预算/树干命中/远处细叶减量');
+const rootField={bounds:[-2,-2,2,2],columns:3,rows:3,heights:[1.6,3.1,4.4,1.5,3,4.7,1.8,3.4,4.9]};
+function rootHeight(x,z){const u=Math.max(0,Math.min(2,(x+2)/2)),v=Math.max(0,Math.min(2,(z+2)/2)),i=Math.min(1,Math.floor(u)),j=Math.min(1,Math.floor(v)),a=u-i,b=v-j,k=j*3+i,h=rootField.heights;
+ return a+b<=1?h[k]+a*(h[k+1]-h[k])+b*(h[k+3]-h[k]):h[k+4]+(a-1)*(h[k+4]-h[k+3])+(b-1)*(h[k+4]-h[k+1]);}
+const mainCylinder=new T.CylinderGeometry(.022,.21,7.49,7,1),start=mainCylinder.attributes.position.count;mainCylinder.dispose();
+for(const tree of [{position:[0,2.75,0],scale:1,kind:'pine',yaw:.37,seed:73},{position:[-.7,2.4,.7],scale:.9,kind:'broadleaf',yaw:1.1,seed:91}]) {
+ const plain=create('mountainWoodland','mountain-woodland',{trees:[tree]}),rooted=create('mountainWoodland','mountain-woodland',{...rootField,trees:[tree]});
+ assert.equal(rooted.root.children.length,plain.root.children.length,'根系增加绘制批次');
+ const trunk=rooted.root.children.find(m=>m.name==='mountain-tree-trunks'),p=trunk.geometry.attributes.position,n=trunk.geometry.attributes.normal;
+ const plainTrunk=plain.root.children.find(m=>m.name==='mountain-tree-trunks');
+ assert.equal(trunk.geometry.index.count-plainTrunk.geometry.index.count,176*3,'每树根颈/支根预算异常');
+ for(let k=0;k<9;k++){const i=start+k;assert(Math.abs(p.getY(i)-rootHeight(p.getX(i),p.getZ(i))+.055*tree.scale)<2e-6,'根颈下缘没有逐点埋入真实折坡');}
+ for(let j=0;j<5;j++)for(let ring=0;ring<4;ring++)for(const edge of [0,4]) {
+  const i=start+37+j*20+ring*5+edge;
+  assert(Math.abs(p.getY(i)-rootHeight(p.getX(i),p.getZ(i))+.024*tree.scale)<2e-6,'支根两侧底缘悬空');
+ }
+ for(let i=start;i<start+137;i++)assert(Math.abs(new T.Vector3().fromBufferAttribute(n,i).length()-1)<1e-5,'根系包含无效法线');
+ const a=plain.root.children.filter(m=>m.isInstancedMesh),b=rooted.root.children.filter(m=>m.isInstancedMesh);
+ for(let i=0;i<a.length;i++)assert.deepEqual(b[i].instanceMatrix.array,a[i].instanceMatrix.array,'补根系改变了树冠随机序列');
+ release(plain);release(rooted);
+}
+console.log('PASS 两种树根颈/支根跨折坡逐点接触, 每树 176 面/无新增批次/树冠序列保留');
 const plants=create('mountainGroundcover','mountain-groundcover',{...field,zones:['fern','scrub','flower'].map(kind=>({kind,center:[0,0],radius:2,count:10}))});
 assert.equal(plants.root.children.length,3);for(const m of plants.root.children){assert(m.instanceColor&&m.instanceColor.array.every(Number.isFinite));const n=m.geometry.attributes.normal;
 for(let i=0;i<n.count;i++)assert(new T.Vector3().fromBufferAttribute(n,i).lengthSq()>.99,'地被叶片退化');}

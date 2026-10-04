@@ -23,7 +23,7 @@ vm.runInContext(`
  ${html.slice(html.indexOf('const STEP_HEIGHT'),html.indexOf('function separateBodies()'))}
  ${html.slice(html.indexOf('function separateBodies()'),html.indexOf('function updateBodyWireframes()'))}
  ${html.slice(html.indexOf('function shoot('),html.indexOf('function reload()'))}
- ${html.slice(html.indexOf('function createInstance(data)'),html.indexOf('function toggleEnemies()'))}
+ ${html.slice(html.indexOf('function createInstance('),html.indexOf('function toggleEnemies()'))}
  ${html.slice(html.indexOf('function toggleDebug()'),html.indexOf('function syncCollisionWireframes()'))}
  ${html.slice(html.indexOf('function updatePlayer(dt)'),html.indexOf("$('start').onclick"))}
  ${html.slice(html.indexOf('function frame(stamp)'),html.indexOf('async function prepareScene()'))}

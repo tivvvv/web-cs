@@ -1,6 +1,6 @@
 // 公园乔木: 连续分枝, 树皮纹理与细叶冠层, 不用实体球团填充树冠; 静态资源只在本模型内共享.
 FPS.models.parkTree = (() => {
-  let leafGeometry, barkMaterial, foliageMaterial;
+  let leafGeometry, barkMaterial, foliageMaterial, shadowMaterial;
   return (T, o = {}) => {
     const root = new T.Group(), branches = [], crowns = [], pose = new T.Object3D();
     let seed = o.seed ?? 71; const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
@@ -71,7 +71,20 @@ FPS.models.parkTree = (() => {
       }
       ctx.putImageData(pixels, 0, 0); const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace;
       map.wrapS = map.wrapT = T.RepeatWrapping; map.anisotropy = 4;
-      barkMaterial = new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .012, roughness: 1, color: 0xb5a593 });
+      barkMaterial = new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .012, roughness: 1, color: 0xb5a593, shadowSide: T.FrontSide });
+      // 阴影图每像素约 7 厘米, 用冠簇轮廓替代数千片细叶的亚像素投影; 保留较大的透光孔隙.
+      const size=64, shadowPixels=new Uint8Array(size*size*4);
+      for(let y=0;y<size;y++)for(let x=0;x<size;x++) {
+        const u=(x+.5)/size*2-1,v=(y+.5)/size*2-1,a=Math.atan2(v,u);
+        const edge=.86+.07*Math.sin(a*5)+.04*Math.cos(a*9),r=Math.hypot(u,v)/edge;
+        let opacity=Math.max(0,Math.min(1,(1-r)*6));
+        for(const [cx,cy,radius]of [[-.28,.16,.17],[.3,-.23,.16],[.05,.46,.13]])
+          opacity*=Math.max(0,Math.min(1,(Math.hypot(u-cx,v-cy)/radius-1)*4));
+        shadowPixels.set([255,255,255,Math.round(opacity*255)],(y*size+x)*4);
+      }
+      const shadowMap=new T.DataTexture(shadowPixels,size,size);shadowMap.generateMipmaps=true;
+      shadowMap.minFilter=T.LinearMipmapLinearFilter;shadowMap.magFilter=T.LinearFilter;shadowMap.needsUpdate=true;
+      shadowMaterial=new T.MeshBasicMaterial({map:shadowMap,alphaTest:.45,side:T.DoubleSide,colorWrite:false,depthWrite:false});
     }
     function leafTexture(canvas) {
       // 只向透明区延伸 RGB, 保留原始 alpha; 缩小采样时不会混入黑底形成跳动的暗边.
@@ -144,6 +157,21 @@ FPS.models.parkTree = (() => {
     }
     // 线性 MSAA 世界缓冲使用覆盖率; 原生画布与单采样倒影保留硬裁切, 避免编码后混合造成额外跳色.
     leaves.onBeforeRender = renderer => { foliageMaterial.userData.coverage.value = renderer.getRenderTarget()?.samples > 1 ? 1 : 0; };
-    leaves.castShadow = leaves.receiveShadow = true; leaves.raycast = () => {}; root.add(leaves); let time = 0; return { root, update(dt) { foliageMaterial.userData.wind.value = (time += dt); } };
+    // 可见细叶只使用冠层明暗, 不接收粗影图中的自阴影; 风动不改变静态树影.
+    leaves.castShadow = leaves.receiveShadow = false; leaves.raycast = () => {}; root.add(leaves);
+    const shadowParts=[];
+    for(const [i,crown]of crowns.entries())for(let side=0;side<3;side++) {
+      const g=new T.PlaneGeometry(2,2);
+      if(side===1)g.rotateY(Math.PI/2);if(side===2)g.rotateX(-Math.PI/2);
+      g.scale(crown.radius*.9,crown.radius*.73*.9,crown.radius*.9).rotateY(i*.67).translate(...crown.tip.toArray());shadowParts.push(g);
+    }
+    const shadowGeometry=T.mergeGeometries(shadowParts),shadowCount=shadowGeometry.index.count;
+    shadowParts.forEach(g=>g.dispose());shadowGeometry.setDrawRange(0,0);
+    const shadow=new T.InstancedMesh(shadowGeometry,shadowMaterial,1);shadow.name='park-canopy-shadow';shadow.castShadow=true;shadow.raycast=()=>{};
+    shadow.computeBoundingBox();shadow.computeBoundingSphere();shadow.count=0;
+    // 零实例让普通绘制在 Three.js 中跳过 GL 提交; 包围体在实例完整时固定, 不随阶段变化.
+    shadow.onBeforeShadow=()=>{shadow.count=1;shadowGeometry.setDrawRange(0,shadowCount);};
+    shadow.onAfterShadow=shadow.onBeforeRender=()=>{shadow.count=0;shadowGeometry.setDrawRange(0,0);};root.add(shadow);
+    let time = 0; return { root, update(dt) { foliageMaterial.userData.wind.value = (time += dt); }, dispose() { leaves.dispose();shadow.dispose(); } };
   };
 })();

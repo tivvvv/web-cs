@@ -1,6 +1,17 @@
 // 连续出露岩层与坡脚碎石. 同一层理方向贯穿岩块, 所有实面合为一个静态网格.
 FPS.models.mountainRocks = (T,o={}) => {
   const root=new T.Group(),parts=[];
+  const field=o.heights,[x0,z0,x1,z1]=o.bounds??[-50,-38,50,38],cols=o.columns??2,rows=o.rows??2;
+  const dx=(x1-x0)/(cols-1),dz=(z1-z0)/(rows-1),up=new T.Vector3(0,1,0),normal=new T.Vector3(),pose=new T.Object3D();
+  function surface(x,z,normal) {
+    const u=Math.max(0,Math.min(cols-1,(x-x0)/dx)),v=Math.max(0,Math.min(rows-1,(z-z0)/dz));
+    const i=Math.min(cols-2,Math.floor(u)),j=Math.min(rows-2,Math.floor(v)),a=u-i,b=v-j,k=j*cols+i,first=a+b<=1;
+    if(normal) {
+      const sx=(first?field[k+1]-field[k]:field[k+cols+1]-field[k+cols])/dx,sz=(first?field[k+cols]-field[k]:field[k+cols+1]-field[k+1])/dz;
+      normal.set(-sx,1,-sz).normalize();
+    }
+    return first?field[k]+a*(field[k+1]-field[k])+b*(field[k+cols]-field[k]):field[k+cols+1]+(a-1)*(field[k+cols+1]-field[k+cols])+(b-1)*(field[k+cols+1]-field[k+1]);
+  }
   function add(source,smooth=false,stone) {
     const g=source.index?source.toNonIndexed():source;if(g!==source)source.dispose();g.computeVertexNormals();
     const p=g.attributes.position,n=g.attributes.normal,colors=[],uv=[];
@@ -17,7 +28,8 @@ FPS.models.mountainRocks = (T,o={}) => {
       const relative=stone?Math.max(0,Math.min(1,(y-stone.position[1])/stone.size[1])):1;
       const damp=Math.max(0,Math.sin(x*.39+z*.27)*.55+Math.cos(z*.61-x*.18)*.25),top=Math.max(0,n.getY(i)-.25);
       const c=new T.Color(0x999783).lerp(new T.Color(0x747e59),damp*top*.38);
-      c.lerp(new T.Color(0x827355),Math.max(0,1-relative/.25)*.62);
+      const contact=field?Math.max(0,1-Math.max(0,y-surface(x,z))/.24):Math.max(0,1-relative/.25);
+      c.lerp(new T.Color(0x827355),contact*.62);
       c.multiplyScalar(.94+.05*Math.sin(x*.12+z*.17)+Math.sin(layer*.95)*.055+relative*.035);colors.push(c.r,c.g,c.b);
       uv.push((Math.abs(n.getX(i))>.6?z:x)/2.2,layer/2.2);
     }
@@ -40,8 +52,21 @@ FPS.models.mountainRocks = (T,o={}) => {
     add(g,true,stone);
   }
   for(const [j,stone]of(o.scree??[]).entries()) {
-    const g=new T.IcosahedronGeometry(1,0);g.scale(stone.size[0]*.5,stone.size[1]*.5,stone.size[2]*.5);g.rotateY(j*2.4);
-    g.translate(stone.position[0],stone.position[1]+stone.size[1]*.5,stone.position[2]);add(g);
+    const g=new T.IcosahedronGeometry(1,1),p=g.attributes.position,lower=[];
+    for(let i=0;i<p.count;i++) {
+      const x=p.getX(i),y=p.getY(i),z=p.getZ(i),weather=.94+.05*Math.sin(x*4+z*3+j)*Math.cos(y*3+j*.37);
+      lower[i]=y<=0;p.setXYZ(i,x*weather*stone.size[0]*.5,y*stone.size[1]*.5,z*weather*stone.size[2]*.5);
+    }
+    pose.position.set(stone.position[0],stone.position[1]+stone.size[1]*.5,stone.position[2]);
+    if(field)surface(stone.position[0],stone.position[2],normal);else normal.copy(up);
+    pose.quaternion.setFromUnitVectors(up,normal);pose.rotateY(j*2.4);pose.updateMatrix();g.applyMatrix4(pose.matrix);
+    if(field) {
+      // 下半圈逐点压入真实三角坡面, 不用中心高度代替整块石头的接触.
+      let bury=0;
+      for(let i=0;i<p.count;i++)if(lower[i])bury=Math.max(bury,p.getY(i)-surface(p.getX(i),p.getZ(i))+.018);
+      g.translate(0,-bury,0);
+    }
+    add(g,true,stone);
   }
   if(o.arch) {
     const {position,length,slope,inner,outer,spring}=o.arch,shape=new T.Shape();shape.moveTo(-outer,0);shape.lineTo(-outer,spring);
@@ -61,7 +86,7 @@ FPS.models.mountainRocks = (T,o={}) => {
       const v=(crack<.035?91:166)+Math.sin(vv*17+Math.sin(u*9)*.4)*9+(seed/4294967296-.5)*17;pixels.data.set([v,v,v-2,255],i*4);
     }
     ctx.putImageData(pixels,0,0);const map=new T.CanvasTexture(canvas);map.wrapS=map.wrapT=T.RepeatWrapping;map.anisotropy=8;
-    const mesh=new T.Mesh(T.mergeGeometries(parts),new T.MeshStandardMaterial({bumpMap:map,bumpScale:.026,vertexColors:true,roughness:1}));mesh.name='mountain-outcrop';mesh.castShadow=mesh.receiveShadow=true;root.add(mesh);parts.forEach(g=>g.dispose());
+    const mesh=new T.Mesh(T.mergeGeometries(parts),new T.MeshStandardMaterial({bumpMap:map,bumpScale:.026,vertexColors:true,roughness:1,shadowSide:T.FrontSide}));mesh.name='mountain-outcrop';mesh.castShadow=mesh.receiveShadow=true;root.add(mesh);parts.forEach(g=>g.dispose());
     return {root,dispose(){map.dispose();}};
   }
   return {root};

@@ -12,11 +12,11 @@ FPS.models.mountainLitter = (T, o = {}) => {
     for(const [px,lift,pz]of points){const wx=x+px*c+pz*s,wz=z-px*s+pz*c;positions.push(wx,height(wx,wz)+lift,wz);colors.push(tint.r,tint.g,tint.b);}
   }
   const segments=(o.paths??[]).flatMap(p=>p.points.slice(1).map((b,i)=>({a:p.points[i],b,width:p.width})));
-  for(const tree of o.trees??[])for(let n=0;n<18&&count<(o.maxCount??600);n++) {
-    const a=random()*Math.PI*2,r=.65+Math.sqrt(random())*2.4,x=tree.position[0]+Math.cos(a)*r,z=tree.position[2]+Math.sin(a)*r;
+  for(const tree of o.trees??[])for(let n=0;n<(tree.litterCount??18)&&count<(o.maxCount??600);n++) {
+    const a=random()*Math.PI*2,r=.65+Math.sqrt(random())*((tree.litterRadius??3.05)-.65),x=tree.position[0]+Math.cos(a)*r,z=tree.position[2]+Math.sin(a)*r;
     if(x<x0+.4||x>x1-.4||z<z0+.4||z>z1-.4||(o.exclusions??[]).some(([a,b,c,d])=>x>a-.35&&x<c+.35&&z>b-.35&&z<d+.35))continue;
     if(segments.some(({a,b,width})=>{const dx=b[0]-a[0],dz=b[2]-a[2],t=clamp(((x-a[0])*dx+(z-a[2])*dz)/(dx*dx+dz*dz));return Math.hypot(x-a[0]-dx*t,z-a[2]-dz*t)<width/2+.65;}))continue;
-    if(Math.hypot(height(x+.15,z)-height(x-.15,z),height(x,z+.15)-height(x,z-.15))/.3>.65)continue;
+    if(Math.hypot(height(x+.15,z)-height(x-.15,z),height(x,z+.15)-height(x,z-.15))/.3>(tree.litterSlope??.65))continue;
     const yaw=random()*Math.PI*2;
     if(tree.kind==='pine')for(let needle=0;needle<4;needle++) {
       const turn=yaw+needle*.63;

@@ -11,7 +11,7 @@ vm.runInContext(`
  const player={position:new T.Vector3(),debug:false};player.body={root:player,radius:.32,height:1.75,vy:0,grounded:false};
  const api={spawn:new T.Vector3()},hints={},$=id=>hints[id]??={};let yaw=0,pitch=0,weapon,renderEffect;
  ${html.slice(html.indexOf('const STEP_HEIGHT'),html.indexOf('function separateBodies()'))}
- ${html.slice(html.indexOf('function createInstance(data)'),html.indexOf('function toggleEnemies()'))}
+ ${html.slice(html.indexOf('function createInstance('),html.indexOf('function toggleEnemies()'))}
  FPS.models.collisionOnly=()=>({root:new T.Group()});
  globalThis.t={solid,actors,player,move,fall,blockedAt,bodiesOverlap,terrainSurface,createInstance};
 `,c);

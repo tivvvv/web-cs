@@ -236,7 +236,7 @@ body[data-freeplay="true"] .mission,body[data-freeplay="true"] .radar{display:no
 </details>
 <script>
 'use strict';
-// 模型工厂约定: FPS.models[name](THREE, options) => {root, update?, beforeRender?, prepare?, render?, dispose?, onHit?, damage?, alive?, muzzle?, debugMeshes?, bodyWire?}.
+// 模型工厂可选 preload(options, {compute}) 预生成数据, 第三个参数接收结果; 原同步接口仍可独立装配.
 // 隔离可选模块的回调异常. 主程序统一维护唯一主循环和通用游戏规则.
 window.FPS = { models: Object.create(null) };
 const $ = id => document.getElementById(id), failures = new Set();
@@ -258,6 +258,89 @@ function load(path) {
     script.src = path + '?v=' + (load.stamp ??= Date.now()); script.onload = () => finish(true);
     script.onerror = () => { report(path, '文件不存在或无法加载'); finish(false); }; document.head.append(script);
   });
+}
+// 只在启动期间运行的有界任务队列. Blob Worker 不依赖 file:// 脚本导入, 计算函数须自包含.
+function createStartupTasks() {
+  const cores = Number(navigator.hardwareConcurrency) || 2;
+  const stats = { limit: Math.max(1, Math.min(3, Math.floor(cores) - 1)), workers: 0, fallbacks: 0, completed: 0 };
+  const queue = [], cancellations = new Set(); let active = 0, closed = false;
+  function inWorker(task, input) {
+    return new Promise((resolve, reject) => {
+      let worker, url, timer, settled = false;
+      const cancel = error => finish(error);
+      function finish(error, value) {
+        if (settled) return; settled = true;
+        clearTimeout(timer); worker?.terminate(); if (url) URL.revokeObjectURL(url); cancellations.delete(cancel);
+        if (error) reject(error); else resolve(value);
+      }
+      try {
+        const source = `'use strict'; const compute = (${task.toString()});
+          self.onmessage = event => {
+            try {
+              const value = compute(event.data), buffers = new Set();
+              function collect(v) {
+                if (v instanceof ArrayBuffer) buffers.add(v);
+                else if (ArrayBuffer.isView(v)) buffers.add(v.buffer);
+                else if (v && typeof v === 'object') Object.values(v).forEach(collect);
+              }
+              collect(value); self.postMessage({ value }, [...buffers]);
+            } catch (error) { self.postMessage({ error: error.message || String(error) }); }
+          };`;
+        url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+        worker = new Worker(url); cancellations.add(cancel);
+        worker.onmessage = event => finish(event.data.error ? Error(event.data.error) : null, event.data.value);
+        worker.onerror = event => { event.preventDefault(); finish(Error(event.message || '生成线程失败')); };
+        worker.onmessageerror = () => finish(Error('生成数据无法接收'));
+        timer = setTimeout(() => finish(Error('生成线程超时')), 30000);
+        // 配置只复制, 不转移输入缓冲, 保留模型与碰撞共用的原始数据.
+        worker.postMessage(input); stats.workers++;
+      } catch (error) { finish(error); }
+    });
+  }
+  async function run(job) {
+    try {
+      let value;
+      try { value = await inWorker(job.task, job.input); }
+      catch (error) {
+        if (closed) throw error;
+        stats.fallbacks++; await yieldStartup();
+        if (closed) throw Error('启动任务已关闭');
+        value = job.task(job.input);
+      }
+      if (closed) throw Error('启动任务已关闭');
+      stats.completed++; job.resolve(value);
+    } catch (error) { job.reject(error); }
+    finally { active--; pump(); }
+  }
+  function pump() { while (!closed && active < stats.limit && queue.length) { active++; void run(queue.shift()); } }
+  return {
+    stats,
+    compute(task, input) {
+      if (closed) return Promise.reject(Error('启动任务已关闭'));
+      return new Promise((resolve, reject) => { queue.push({ task, input, resolve, reject }); pump(); });
+    },
+    dispose() {
+      closed = true;
+      for (const cancel of cancellations) cancel(Error('启动任务已关闭'));
+      for (const job of queue.splice(0)) job.reject(Error('启动任务已关闭'));
+    }
+  };
+}
+// 普通批次只让出事件循环; 阶段切换等待绘制, 不让每个小任务都多等一帧.
+function yieldStartup(paint = false) {
+  if (!paint) return new Promise(resolve => setTimeout(resolve, 0));
+  return new Promise(resolve => {
+    let finished = false, frame;
+    const finish = () => { if (finished) return; finished = true; clearTimeout(timer); if (frame !== undefined) cancelAnimationFrame(frame); resolve(); };
+    const timer = setTimeout(finish, 50);
+    if (!document.hidden) frame = requestAnimationFrame(() => setTimeout(finish, 0));
+  });
+}
+const loading = { stage: '加载脚本', totalMs: null, phases: [], models: [], tasks: null };
+const loadingStarted = performance.now(); let loadingPhaseStarted = loadingStarted;
+function loadingStage(stage) {
+  const now = performance.now(); loading.phases.push({ stage: loading.stage, ms: now - loadingPhaseStarted });
+  loading.stage = stage; loadingPhaseStarted = now; $('start-label').textContent = stage;
 }
 let T, renderer, scene, camera, layout, weapon, api, renderEffect, solid = [], actors = [], entries = [], effects = [], helpers = [], ladders = [];
 let mode = 'menu', ready = false, time = 0, kills = 0, total = 0, yaw = 0, pitch = 0;
@@ -695,7 +778,7 @@ function playerFire() {
   pitch = clamp(pitch + .007, -1.5, 1.5);
 }
 function reload() { if (layout.mode !== 'explore' && mode === 'playing' && ammo < 30 && reloadLeft <= 0) { reloadLeft = 1.65; reloadSound(0); tell('更换弹匣'); } }
-function createInstance(data) {
+function createInstance(data, assets) {
   if (!data || typeof data.id !== 'string' || entries.some(e => e.id === data.id)) throw Error('实例 ID 缺失或重复');
   const factory = FPS.models[data.model]; if (typeof factory !== 'function') throw Error('模型不可用: ' + data.model);
   const position = tuple(data.position, [0, 0, 0]), rotation = tuple(data.rotation, [0, 0, 0]), scale = tuple(data.scale, [1, 1, 1]);
@@ -732,7 +815,7 @@ function createInstance(data) {
     const pose = new T.Object3D(); pose.position.set(...position); pose.rotation.set(...rotation); pose.scale.set(...scale); pose.updateMatrix();
     climbRoutes = buildClimbRoutes(data.traversal.ladders, pose.matrix);
   }
-  const instance = factory(T, data.options || {}); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
+  const instance = factory(T, data.options || {}, assets); if (!instance?.root?.isObject3D) throw Error('模型未返回有效 root');
   for (const callback of ['update', 'beforeRender', 'prepare', 'render', 'dispose', 'onHit', 'damage']) if (instance[callback] !== undefined && typeof instance[callback] !== 'function') throw Error(callback + ' 必须为函数');
   if (instance.muzzle !== undefined && !instance.muzzle?.isObject3D) throw Error('枪口必须为 Object3D');
   if (body && typeof instance.damage !== 'function') throw Error('动态身体需要角色伤害接口');
@@ -921,7 +1004,7 @@ function renderWorld() {
   }
   if (renderEffect && !renderEffect.disabled) {
     try { return renderEffect.render(renderer, scene, camera); }
-    catch (e) { renderEffect.disabled = true; renderer.setRenderTarget(null); report(renderEffect.id, e); renderEffect.dispose?.(); }
+    catch (e) { renderEffect.disabled = true; renderer.setRenderTarget(null); report(renderEffect.id, e); guarded(renderEffect.id + ' 清理', () => renderEffect.dispose?.()); }
   }
   renderer.render(scene, camera);
 }
@@ -1038,7 +1121,7 @@ async function boot() {
       light.target.position.set(...tuple(l.target, [0, 0, 0])); scene.add(light.target); light.castShadow = !!l.shadow;
       const extent = l.shadowExtent || 38;
       const shadowSize = Math.min(renderer.capabilities.maxTextureSize, l.shadowSize || 2048);
-      Object.assign(light.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 1, far: l.shadowFar || 90 }); light.shadow.mapSize.set(shadowSize, shadowSize); light.shadow.bias = l.shadowBias ?? -.0004; light.shadow.normalBias = .035;
+      Object.assign(light.shadow.camera, { left: -extent, right: extent, top: extent, bottom: -extent, near: 1, far: l.shadowFar || 90 }); light.shadow.mapSize.set(shadowSize, shadowSize); light.shadow.bias = l.shadowBias ?? -.0004; light.shadow.normalBias = l.shadowNormalBias ?? .035;
       light.shadow.autoUpdate = !l.staticShadow; light.shadow.needsUpdate = true;
     }
   });
@@ -1054,7 +1137,29 @@ async function boot() {
   }));
   const instances = Array.isArray(layout.instances) ? layout.instances : [];
   if (!Array.isArray(layout.instances)) report('场景布局', 'instances 必须是数组');
-  for (const data of instances) guarded('实例 ' + (data?.id || '?'), () => createInstance(data));
+  loadingStage('正在生成场景'); await yieldStartup(true);
+  const tasks = createStartupTasks(), prepared = instances.map(data => {
+    const preload = FPS.models[data?.model]?.preload;
+    // 立即启动独立重计算, 同时按原顺序装配, 不改变实例/角色/渲染模块的接入顺序.
+    return typeof preload === 'function' ? Promise.resolve().then(() => preload(data.options || {}, tasks)).catch(error => {
+      report('预生成 ' + (data?.id || '?'), error); return undefined;
+    }) : null;
+  });
+  loading.tasks = tasks.stats;
+  try {
+    // 先让预生成回调提交所有线程任务, 再执行第一个同步工厂.
+    await Promise.resolve();
+    let sliceStarted = performance.now();
+    for (let i = 0; i < instances.length; i++) {
+      const data = instances[i], assets = prepared[i] ? await prepared[i] : undefined; prepared[i] = null;
+      const started = performance.now(); guarded('实例 ' + (data?.id || '?'), () => createInstance(data, assets));
+      loading.models.push({ id: data?.id, ms: performance.now() - started });
+      if (performance.now() - sliceStarted >= 8) {
+        $('start-label').textContent = `正在生成场景 ${i + 1} / ${instances.length}`;
+        await yieldStartup(); sliceStarted = performance.now();
+      }
+    }
+  } finally { tasks.dispose(); }
   enemySpawns = actors.map(a => a.data);
   total = actors.length; $('target-total').textContent = String(total).padStart(2, '0');
   if (!solid.some(s => overlaps(api.spawn.clone().add(new T.Vector3(0, -.1, 0)), .1, .1, s.box))) {
@@ -1081,13 +1186,14 @@ async function boot() {
     document.querySelector('.controls span:nth-child(3)').innerHTML = '<kbd>SPACE</kbd>跳跃';
     document.querySelector('.hud-help').textContent = 'WASD 漫步  SPACE 跳跃  SHIFT 奔跑  B 自由飞行  P 性能  U 敌人开关  ESC 暂停';
   }
-  $('start-label').textContent = '正在准备画面';
+  loadingStage('正在准备画面'); await yieldStartup(true);
   try { await prepareScene(); } catch (error) { report('渲染准备', error); }
+  loadingStage('准备完成'); loading.totalMs = performance.now() - loadingStarted;
   if (!failures.size) $('system-status').textContent = 'SYSTEM ONLINE / 本地就绪';
   $('start-label').textContent = total ? '进入训练场' : '进入场景'; $('start').disabled = false; ready = true;
   window.addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
   // 提供状态和实例引用以便排查问题, 不创建额外的主循环.
-  FPS.inspect = () => ({ ready, mode, time, ammo, reloadLeft, kills, total, enemiesEnabled, player, actors, entries, solid, camera, renderer, performance:frameStats.snapshot(), failures: [...failures] });
+  FPS.inspect = () => ({ ready, mode, time, ammo, reloadLeft, kills, total, enemiesEnabled, player, actors, entries, solid, camera, renderer, performance:frameStats.snapshot(), loading, failures: [...failures] });
   renderer.setAnimationLoop(stamp => { try { frame(stamp); } catch (error) { report('主循环', error); } });
 }
 boot().catch(error => { report('初始化', error); $('start-label').textContent = '初始化失败 · 查看错误'; });

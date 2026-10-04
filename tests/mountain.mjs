@@ -17,11 +17,19 @@ assert(!Object.keys(layout.catalog).some(k=>k.startsWith('hillside')));
 const routes=layout.regionPlan.corners[2].routes,walkingPaths=[...routes.paths,...routes.links];assert.equal(routes.links.length,2);assert.equal(routes.approaches.length,3);assert.equal(routes.summitY,26.4);assert(routes.peakY>29);assert.equal(routes.paths.length,3);assert.equal(routes.stairs.length,2);
 const heightData=district.find(i=>i.model==='coastalMountain').options.heights;
 assert(Math.max(...heightData)>32&&Math.max(...heightData)<35.4,'自然主峰必须高于观景设施且位于高度场范围内');
+// 西侧近景切坡不能再出现连续窄折棱, 同时保留真实陡壁和制高点.
+const heightAt=(x,z)=>heightData[(z+38)*101+x+50],cliffCurvatures=[];
+for(let z=-14;z<12;z++)for(let x=-26;x<-10;x++) {
+ const y=heightAt(x,z),ax=heightAt(x+1,z),bx=heightAt(x-1,z),az=heightAt(x,z+1),bz=heightAt(x,z-1);
+ if(Math.hypot(ax-bx,az-bz)/2>1.1)cliffCurvatures.push(Math.max(Math.abs(ax+bx-2*y),Math.abs(az+bz-2*y)));
+}
+assert(cliffCurvatures.length>100&&Math.max(...cliffCurvatures)<1.2,'近景山壁退化成平地或存在短波折棱');
+console.log('PASS 西侧陡壁坡肩连续/短波曲率/自然主峰保留');
 vm.runInContext(`const T=THREE, scene=new T.Scene(), camera=new T.PerspectiveCamera(), solid=[], actors=[], entries=[], ladders=[],keys=new Set(),hints={};
  const player={position:new T.Vector3(),debug:false};player.body={root:player,radius:.32,height:1.75,vy:0,grounded:false};
  let yaw=0,pitch=0,walk=0,weapon,renderEffect;const api={spawn:new T.Vector3(115,2.4,78)},$=id=>hints[id]??={};
  ${html.slice(html.indexOf('const STEP_HEIGHT'),html.indexOf('function separateBodies()'))}
- ${html.slice(html.indexOf('function createInstance(data)'),html.indexOf('function toggleEnemies()'))}
+ ${html.slice(html.indexOf('function createInstance('),html.indexOf('function toggleEnemies()'))}
  ${html.slice(html.indexOf('function updatePlayer(dt)'),html.indexOf('function showMenu('))}
  FPS.models.collisionOnly=()=>({root:new T.Group()});
  globalThis.t={solid,entries,ladders,keys,player,move,fall,blockedAt,terrainSurface,createInstance,updatePlayer,face:n=>{yaw=Math.atan2(n.x,n.z);}};`,c);
@@ -98,6 +106,39 @@ for(const route of mapRoutes){const stroke=signMap.strokes.find(s=>s.color===rou
  route.points.forEach(([px,,pz],i)=>assert(Math.abs(stroke.points[i][0]-(512+24+(px+50)*208/100))<.0001&&Math.abs(stroke.points[i][1]-(256+22+(pz+38)*72/76))<.0001,'导览图采样与实际路线偏离'));}
 console.log('PASS 导览图与实际五条路线逐点一致, 主路分别着色/联络路统一标识');
 const ray=new T.Raycaster(),mountain=models.find(m=>m.data.model==='coastalMountain'),access=models.find(m=>m.data.model==='mountainTrails');
+// 用实际合批网格和原高度场检查入口成对齐平, 牌面朝外, 底部不悬空; 同时核对实体覆盖.
+const furnitureOptions=facilities.data.options,furnitureSolids=allSolids.filter(s=>s.id===facilities.data.id);
+const furniturePoint=(p,x=0,y=0,z=0)=>new T.Vector3(x,y,z).applyMatrix4(new T.Matrix4().makeRotationY(p.yaw??0))
+ .add(new T.Vector3(...p.position)).add(new T.Vector3(...facilities.data.position));
+for(const [i,path]of routes.paths.entries()) {
+ const pair=furnitureOptions.markers.slice(i*2,i*2+2),tangent=new T.Vector3(...path.points[1]).sub(new T.Vector3(...path.points[0]));tangent.y=0;tangent.normalize();
+ const row=furniturePoint(pair[1]).sub(furniturePoint(pair[0]));row.y=0;assert(Math.abs(row.dot(tangent))<1e-6,'石碑没有垂直于入口道路成对排列');
+ const caps=[];
+ for(const marker of pair) {
+  const front=new T.Vector3(Math.sin(marker.yaw),0,Math.cos(marker.yaw));assert(front.dot(tangent)<-.99999,'石碑牌面没有朝向来路');
+  ray.far=2;ray.set(furniturePoint(marker,0,marker.height+1,0),new T.Vector3(0,-1,0));const cap=ray.intersectObject(facilities.model.root,true)[0];
+  assert(cap?.face.normal.y>.99999,'石碑冠顶歪斜/缺失');caps.push(cap.point.y);
+  const label=furniturePoint(marker,0,marker.height-.28,0);ray.set(label.addScaledVector(front,.9),front.clone().negate());
+  const face=ray.intersectObject(facilities.model.root,true)[0];
+  if(marker.slot!==undefined)assert(face?.object.material.map?.image.width===1024,'从入口看不到石碑牌面');
+  for(let x=-5;x<=5;x++)for(let z=-5;z<=5;z++) {
+   const foot=furniturePoint(marker,x*marker.width/10,0,z*marker.width/10),ground=t.terrainSurface(foot,0,terrain.box).top;
+   assert(foot.y<=ground-.014,'石碑脚印有悬空角');
+  }
+  for(const x of [-1,1])for(const z of [-1,1]) {
+   const corner=furniturePoint(marker,x*(marker.width+.08)/2,marker.height+.1,z*(marker.width+.08)/2);
+   assert(furnitureSolids.some(s=>s.box.clone().expandByScalar(1e-5).containsPoint(corner)),'旋转后的冠顶超出实体');
+  }
+ }
+ assert(Math.abs(caps[0]-caps[1])<1e-5,'成对石碑实际冠顶不齐平');
+}
+for(const sign of furnitureOptions.signs)for(const side of [-1,1]) {
+ const foot=furniturePoint(sign,side*sign.width*.36),ground=t.terrainSurface(foot,0,terrain.box).top,front=new T.Vector3(Math.sin(sign.yaw??0),0,Math.cos(sign.yaw??0));
+ foot.y=ground+.025;ray.far=.7;ray.set(foot.clone().addScaledVector(front,.35),front.clone().negate());
+ assert(ray.intersectObject(facilities.model.root,true).length,'路牌支脚未接到真实坡面');
+ assert(furnitureSolids.some(s=>s.box.containsPoint(foot)),'贴坡路牌立柱和碰撞底高不一致');
+}
+console.log('PASS 三处入口石碑成对齐平/朝外/脚印埋地/旋转碰撞与六个路牌支脚贴坡');
 for(let x=76.3;x<168;x+=7.3)for(let z=81.2;z<152;z+=6.1){const p=new T.Vector3(x,40,z),top=t.terrainSurface(p,0,terrain.box).top;ray.set(p,new T.Vector3(0,-1,0));ray.far=42;const hit=ray.intersectObject(mountain.model.root,true)[0];assert(hit&&Math.abs(hit.point.y-top)<.00001,'高度场与可见三角面不一致');}
 console.log('PASS 山体高度场与实际网格插值/对角线一致');
 const backdrop=models.find(m=>m.data.model==='coastalRidges');assert(!backdrop.data.collision.enabled&&backdrop.meshes.length===1);
@@ -122,12 +163,12 @@ const colors=new Set();for(let i=0;i<macro.ctx.pixels.data.length;i+=4096)colors
 assert(colors.size>100,'山体缺少宏观草土/裸岩色块');assert(Math.max(...rough.ctx.pixels.data.filter((_,i)=>i%4===0))-Math.min(...rough.ctx.pixels.data.filter((_,i)=>i%4===0))>15,'干湿粗糙度没有变化');
 const cliff=mountain.meshes.find(m=>m.name==='mountain-rock-face');
 assert(cliff.material.map===soil.map&&cliff.material.roughnessMap===soil.roughnessMap,'草土与岩面宏观色块接缝');
-assert(cliff.material.bumpMap.channel===1&&cliff.geometry.attributes.uv1,'岩面独立 UV 未接入');
+assert(cliff.geometry.attributes.rockMix&&!cliff.geometry.attributes.uv1,'岩面仍按三角面切换投影/缺少连续混合权重');
 const backgroundColors=backdrop.meshes[0].geometry.attributes.color;
 for(let i=0;i<bg.count;i++)if((bg.getX(i)===50&&bg.getZ(i)<=38)||(bg.getZ(i)===38&&bg.getX(i)<=50)) {
  const x=Math.round((bg.getX(i)+50)/100*1023),y=Math.round((38-bg.getZ(i))/76*1023),offset=(y*1024+x)*4,c=new T.Color().setRGB(backgroundColors.getX(i),backgroundColors.getY(i),backgroundColors.getZ(i)).convertLinearToSRGB();
  [c.r,c.g,c.b].forEach((v,j)=>assert(Math.abs(v*255-macro.ctx.pixels.data[offset+j])<18,'背景接边宏观色与山体不一致'));}
-console.log('PASS 草土/岩面/远景色图接边与共享法线, 土径磨损颗粒/干湿粗糙度与独立岩纹 UV');
+console.log('PASS 草土/岩面/远景色图接边与共享法线, 土径磨损颗粒/干湿粗糙度与连续岩纹权重');
 let hidden=0,exposed=0,peek=false;const naturalRoots=[mountain.model.root,models.find(m=>m.data.model==='mountainRocks').model.root],target=new T.Vector3(133,28.05,137);
 for(const path of walkingPaths){let previous;
  for(const p of path.points){const from=new T.Vector3(p[0],walkSupport(p)+1.65,p[2]),direction=target.clone().sub(from);ray.far=direction.length()-.03;ray.set(from,direction.normalize());const blocked=ray.intersectObjects(naturalRoots,true).length>0;
@@ -226,6 +267,14 @@ for(const transformed of [false,true]) {
 woodland.model.root.rotation.y=0;woodland.model.root.scale.set(1,1,1);woodland.model.root.updateWorldMatrix(true,true);
 console.log('PASS 树干分树剔除与原始射线命中/法线/面编号一致, 含旋转缩放');
 console.log('PASS 混合林树根/树干命中/稳定树冠, 距离减叶不重建缓冲 '+JSON.stringify({trees:trees.length,nearLeafTriangles:fullLeaves*2,farLeafTriangles:baseCount*2,meshes:woodland.meshes.length}));
+const ridgeTrees=trees.filter(tree=>tree.litterRadius);assert.equal(ridgeTrees.length,2);
+for(const tree of ridgeTrees) {
+ const [x,,z]=tree.position,candidates=plants.meshes.flatMap(mesh=>Array.from({length:mesh.count},(_,i)=>{mesh.getMatrixAt(i,pose);return new T.Vector3().setFromMatrixPosition(pose);}));
+ assert(candidates.filter(p=>Math.hypot(p.x-x,p.z-z)<2.3).length>=4,'高处树脚缺少植被过渡');
+ const at=(a,b)=>t.terrainSurface(new T.Vector3(a+120,40,b+116),0,terrain.box).top;
+ assert(Math.hypot(at(x+.25,z)-at(x-.25,z),at(x,z+.25)-at(x,z-.25))*2<.95,'高处树仍立在陡壁上');
+}
+console.log('PASS 两处高位树脚坡肩落点/近根地被过渡');
 for(const rail of routes.rails){const a=new T.Vector3(...rail.a),delta=new T.Vector3(...rail.b).sub(a),normal=new T.Vector3(-delta.z,0,delta.x).normalize();ray.far=.25;
  for(const q of [0,.25,.5,.75,1])for(const lift of [.55,1.04]){const p=a.clone().addScaledVector(delta,q);p.y+=lift;ray.set(p.addScaledVector(normal,.12),normal.clone().negate());assert(ray.intersectObject(access.model.root,true)[0],'栏杆断开 '+JSON.stringify(rail));}}
 console.log('PASS 山径/山顶/栈道双横栏连续性');
@@ -258,9 +307,12 @@ for(const node of routes.nodes)for(const lookout of [[133,28.05,137],[129,28.05,
 }
 console.log('PASS 两处岔路战斗节点接入可走坡面/自然岩层掩体');
 console.log('PASS '+rocks.data.options.stones.length+' 处岩脊/掩体底部嵌入实际坡面');
-assert(rocks.data.options.scree.length>30,'岩层缺少碎石过渡');
-const rubbleGeometry=new T.IcosahedronGeometry(1,0),rubbleVertices=rubbleGeometry.attributes.position.count;rubbleGeometry.dispose();
+assert(rocks.data.options.scree.length>=20&&rocks.data.options.scree.length<=100,'坡脚碎石密度/预算异常');
+const rubbleGeometry=new T.IcosahedronGeometry(1,1),rubbleVertices=rubbleGeometry.attributes.position.count;rubbleGeometry.dispose();
 for(let j=0;j<rocks.data.options.scree.length;j++){const p=rocks.meshes[0].geometry.attributes.position,start=rocks.data.options.stones.length*stoneVertices+j*rubbleVertices;let clearance=Infinity;
+ const stone=rocks.data.options.scree[j];assert(stone.size[1]<=stone.size[0]*.42+1e-8,'碎石比例过于直立');
+ const [x,y,z]=stone.position.map((v,i)=>v+rocks.data.position[i]),sample=(a,b)=>t.terrainSurface(new T.Vector3(a,y,b),0,terrain.box).top;
+ assert(Math.hypot(sample(x+.35,z)-sample(x-.35,z),sample(x,z+.35)-sample(x,z-.35))/.7<=.55001,'陡岩上仍挂有碎石');
  for(let i=start;i<start+rubbleVertices;i++){const point=new T.Vector3().fromBufferAttribute(p,i).add(new T.Vector3(...rocks.data.position));clearance=Math.min(clearance,point.y-t.terrainSurface(point,0,terrain.box).top);}
  assert(clearance<0,'坡脚碎石悬空 '+j);
 }

@@ -432,15 +432,16 @@
     {width:19,points:[[-42,7.8,5],[-28,13.4,12],[-18,17,22],[-10,22,24]]},
     {width:18,points:[[13,16,4],[27,22,7],[36,18,20],[45,8,31]]}
   ];
-  function mountainHeight(x,z) {
+  function mountainHeight(x,z,profiles) {
     let y=2.4;
     for(const ridge of mountainRidges){const p=profileAt(x,z,ridge.points,true);y=Math.max(y,2.4+(p.top-2.4)*Math.exp(-2*(p.distance/ridge.width)**2));}
     const relief=.65*Math.sin(x*.19+z*.13)+.35*Math.cos(z*.27-x*.09);
     const gully=1.9*Math.exp(-(((x+9-z*.22)/4.2)**2))*Math.exp(-(((z+6)/17)**2));
     y=2.4+(y-2.4+Math.min(1,(y-2.4)/5)*(relief-gully))*Math.min(1,Math.max(0,Math.min(x+50,z+38)/7));
     // 土径只整理脚下缓坡, 外缘以宽坡肩渐变; 平台整形限制在少量实际构筑物周围.
-    for(const path of shapingPaths) {
-      const p=profileAt(x,z,path.points),weight=Math.max(0,Math.min(1,1-(p.distance-path.width/2-1.8)/3.5));
+    for(let i=0;i<shapingPaths.length;i++) {
+      const path=shapingPaths[i],p=profiles[i],shoulder=5.8+.45*Math.sin(x*.23+z*.17);
+      const weight=Math.max(0,Math.min(1,1-(p.distance-path.width/2-1.8)/shoulder));
       y+=(p.top-y)*weight*weight*(3-2*weight);
     }
     for (const p of trailPads) if (p.fill) {
@@ -458,14 +459,31 @@
       if(distance<=.8)carved=Math.min(carved,target);
     }
     // 通道余量覆盖脚底采样及相邻网格, 避免路边三角面和平台整形产生隐形陡坎.
-    for(const path of shapingPaths){
-      const p=profileAt(x,z,path.points),weight=Math.max(0,Math.min(1,1-(p.distance-path.width/2-1.8)));
+    for(let i=0;i<shapingPaths.length;i++){
+      const path=shapingPaths[i],p=profiles[i],weight=Math.max(0,Math.min(1,1-(p.distance-path.width/2-1.8)));
       y+=(p.top-y)*weight*weight*(3-2*weight);
     }
     return Math.max(2.4,Math.min(carved,y));
   }
-  for (let j=0;j<mountain.rows;j++) for (let i=0;i<mountain.columns;i++) mountain.heights.push(mountainHeight(i-50,j-38));
   mountain.exclusions = [...trailPads.map(p=>p.rect),...mountainStairs.map(({localA:a,localB:b,width:w})=>[Math.min(a[0],b[0])-w/2-.5,Math.min(a[2],b[2])-w/2-.5,Math.max(a[0],b[0])+w/2+.5,Math.max(a[2],b[2])+w/2+.5])];
+  // 只平滑路外短波折棱. 固定走廊/构筑物/接边顶点, 身体与模型继续共用最终高度场.
+  const slopeSmoothing=[];
+  for(let j=0;j<mountain.rows;j++)for(let i=0;i<mountain.columns;i++) {
+    const x=i-50,z=j-38,profiles=shapingPaths.map(p=>profileAt(x,z,p.points));
+    // 同一顶点的路线距离/高度复用三次, 不为平滑权重重复遍历圆角路径.
+    mountain.heights.push(mountainHeight(x,z,profiles));
+    let margin=Math.min(x+50,50-x,z+38,38-z)/2;
+    for(let k=0;k<shapingPaths.length;k++)margin=Math.min(margin,(profiles[k].distance-shapingPaths[k].width/2-1.8)/2.2);
+    for(const rect of mountain.exclusions)margin=Math.min(margin,(distanceToRect(x,z,rect)-1)/2.2);
+    const w=Math.max(0,Math.min(1,margin));slopeSmoothing.push(w*w*(3-2*w));
+  }
+  for(let pass=0;pass<3;pass++) {
+    const h=mountain.heights,next=h.slice(),columns=mountain.columns;
+    for(let j=1;j<mountain.rows-1;j++)for(let i=1;i<columns-1;i++){
+      const k=j*columns+i;next[k]=h[k]+((h[k-1]+h[k+1]+h[k-columns]+h[k+columns])/4-h[k])*.6*slopeSmoothing[k];
+    }
+    mountain.heights=next;
+  }
   const mountainSample = (x,z) => {
     const u=Math.max(0,Math.min(100,x+50)),v=Math.max(0,Math.min(76,z+38)),i=Math.min(99,Math.floor(u)),j=Math.min(75,Math.floor(v)),a=u-i,b=v-j,k=j*101+i,h=mountain.heights;
     return a+b<=1 ? h[k]+a*(h[k+1]-h[k])+b*(h[k+101]-h[k]) : h[k+102]+(a-1)*(h[k+102]-h[k+101])+(b-1)*(h[k+102]-h[k+1]);
@@ -532,13 +550,35 @@
   for(const stone of mountainStones)for(let i=0;i<9;i++) {
     const a=rockRandom()*Math.PI*2,r=.5+rockRandom()*.65,x=stone.position[0]+Math.cos(a)*stone.size[0]*r,z=stone.position[2]+Math.sin(a)*stone.size[2]*r;
     if(x<-49||x>49||z<-37||z>37||allMountainPaths.some(p=>profileAt(x,z,p.points).distance<p.width/2+.8)||mountain.exclusions.some(rect=>distanceToRect(x,z,rect)<.8))continue;
-    const w=.25+rockRandom()*.55;scree.push({position:[x,mountainSample(x,z)-.12,z],size:[w,.18+rockRandom()*.3,w*(.65+rockRandom()*.4)]});
+    const w=.25+rockRandom()*.55,h=w*(.26+rockRandom()*.16),d=w*(.7+rockRandom()*.3);
+    const slope=Math.hypot(mountainSample(x+.35,z)-mountainSample(x-.35,z),mountainSample(x,z+.35)-mountainSample(x,z-.35))/.7;
+    const footing=[-.5,0,.5].flatMap(a=>[-.5,0,.5].map(b=>mountainSample(x+a*w,z+b*d)));
+    // 碎石落在缓坡和坡脚, 不在陡壁上挂多面体; 高度随宽度缩放并埋入一半以上.
+    if(slope>.55||Math.max(...footing)-Math.min(...footing)>w*.65)continue;
+    scree.push({position:[x,mountainSample(x,z)-h*.6,z],size:[w,h,d]});
   }
   mountain.soilPatches.push(...mountainStones.map(({position:[x,,z],size:[w,,d]})=>({center:[x,z],radius:[w*.85,d*.85],strength:.82})),
     {center:[-4,31],radius:[6,3.4],strength:.68},{center:[37,21],radius:[4.3,6],strength:.62});
-  place('mountain-rocks','mountainRocks',mountainRoot,{stones:mountainStones,scree},rockCollision);
-  const trailMarkers=[[-14.5,-36,0],[-9.5,-36,0],[-49,-3.2,Math.PI/2],[-49,3.2,Math.PI/2],[37.8,-36,0],[42.2,-36,0]]
-    .map(([x,z,yaw],i)=>({position:[x,mountainSample(x,z),z],yaw,slot:i%2===0?0:undefined}));
+  place('mountain-rocks','mountainRocks',mountainRoot,{stones:mountainStones,scree,bounds:mountain.bounds,columns:mountain.columns,rows:mountain.rows,heights:mountain.heights},rockCollision);
+  function mountainFootHeights(position,width,depth,yaw=0) {
+    const c=Math.cos(yaw),s=Math.sin(yaw);
+    return [-.5,0,.5].flatMap(x=>[-.5,0,.5].map(z=>mountainSample(
+      position[0]+x*width*c+z*depth*s,position[2]-x*width*s+z*depth*c)));
+  }
+  // 每对石碑沿入口切线的垂线排列并朝向来路, 冠顶齐平; 各自底部埋入整块脚印的最低坡面.
+  const trailMarkers=mountainPaths.flatMap(path=>{
+    const [a,b]=path.points,dx=b[0]-a[0],dz=b[2]-a[2],length=Math.hypot(dx,dz),yaw=Math.atan2(-dx,-dz);
+    const distance=Math.min(2,length),center=[a[0]+dx/length*distance,0,a[2]+dz/length*distance],span=path.width/2+.9;
+    const pair=[-1,1].map(side=>{
+      const position=[center[0]+side*Math.cos(yaw)*span,0,center[2]-side*Math.sin(yaw)*span];
+      return {position,ground:mountainFootHeights(position,.52,.52,yaw)};
+    });
+    const top=Math.max(...pair.flatMap(p=>p.ground))+1.3;
+    return pair.map(({position,ground},i)=>{
+      position[1]=Math.min(...ground)-.04;
+      return {position,yaw,width:.52,height:top-position[1],slot:i===0?0:undefined};
+    });
+  });
   const trailFurniture={weathered:true,trailMap:allMountainPaths.map((p,i)=>({points:p.points,color:['#e2c990','#b9d0ac','#a7c7d0','#c2afa2','#c2afa2'][i]})),
     labels:[['海望山','COASTAL HILL / 03'],['山頂登山道','SUMMIT / SOUTH ROUTE'],['林間の登山道','SUMMIT / FOREST ROUTE'],['山頂展望台','SUMMIT / 26.4 M'],['海岸と港','COAST & TERMINAL'],['竪梯子 ↑','LADDER / SHORTCUT'],['登山道案内','TRAIL MAP'],['岩壁の桟道','CLIFF WALK']],
     markers:trailMarkers,benches:[{position:[14,26.4,22.5],yaw:Math.PI}],
@@ -547,14 +587,22 @@
     signs:[{position:[-17,mountainSample(-17,-35),-35],slot:0,width:1.6},
       {position:[-46,mountainSample(-46,-5.5),-5.5],slot:6,width:1.6,height:2.1,yaw:Math.PI/2},
       {position:[29,15,2.4],slot:5,width:1.2,height:2.1}],cabinets:[]};
+  // 路牌保持直立与原牌面高度, 两个脚座独立贴坡; 局部底高同时供模型和实体立柱使用.
+  for(const p of trailFurniture.signs) {
+    const yaw=p.yaw??0;
+    p.postBottoms=[-1,1].map(side=>{
+      const x=side*(p.width??2.1)*.36,foot=[p.position[0]+x*Math.cos(yaw),0,p.position[2]-x*Math.sin(yaw)];
+      return Math.min(...mountainFootHeights(foot,.22,.22,yaw))-.03-p.position[1];
+    });
+  }
   function trailFurnitureSolids(s) {
     return [...(s.planters??[]).map(p=>box(p.size,[p.position[0],p.position[1]+p.size[1]/2,p.position[2]])),
       ...(s.benches??[]).map(p=>facadeBox([p.width??2.1,.9,.6],{position:p.position,yaw:p.yaw??0},[0,.45,0])),
       ...(s.cabinets??[]).map(p=>box([p.size[0]+.08,p.size[1]+.06,p.size[2]+.12],[p.position[0],p.position[1]+p.size[1]/2,p.position[2]+.03])),
       ...(s.scopes??[]).map(p=>facadeBox([.7,1.5,.85],{position:p.position,yaw:p.yaw??0},[0,.75,-.1])),
-      ...(s.markers??[]).map(p=>box([(p.width??.52)+.08,(p.height??1.3)+.1,(p.width??.52)+.08],[p.position[0],p.position[1]+((p.height??1.3)+.1)/2,p.position[2]])),
+      ...(s.markers??[]).map(p=>facadeBox([(p.width??.52)+.08,(p.height??1.3)+.1,(p.width??.52)+.08],{position:p.position,yaw:p.yaw??0},[0,((p.height??1.3)+.1)/2,0])),
       ...(s.signs??[]).flatMap(p=>{const w=p.width??2.1,h=p.height??2.5,face={position:p.position,yaw:p.yaw??0};return [
-        ...[-1,1].map(x=>facadeBox([.09,h,.09],face,[x*w*.36,h/2,0])),
+        ...[-1,1].map((x,i)=>{const bottom=p.postBottoms?.[i]??0;return facadeBox([.09,h-bottom,.09],face,[x*w*.36,(h+bottom)/2,0]);}),
         facadeBox([w,p.panelHeight??.7,.14],face,[0,h-.37,.04]),facadeBox([w+.2,.08,.36],face,[0,h+.1,.035])];}),
       ...(s.shelters??[]).flatMap(p=>{const w=p.width,d=p.depth,h=p.height??2.7,rise=p.kind==='lookout'?Math.tan(p.roofPitch??.24)*w/2:0;
         return [...[-1,1].flatMap(x=>[-1,1].map(z=>facadeBox([.3,h,.3],{position:p.position,yaw:p.yaw??0},[x*(w/2-.12),h/2,z*(d/2-.12)]))),
@@ -564,26 +612,30 @@
   place('mountain-rest-facilities','trailFacilities',mountainRoot,trailFurniture,trailFurnitureSolids(trailFurniture));
   // 三个疏密不同的林群围住山麓与沟谷, 给中坡留出草坡和射击窗口.
   const treeCandidates=[[-44,-27],[-38,-29],[-33,-25],[-43,-20],[-32,-32],[-39,-13],[-26,-26],
-    [-43,3],[-39,9],[-36,15],[-44,18],[-40,28],[-30,28],[-25,32],[-21,5],[-18,1],
+    [-43,3],[-39,9],[-36,15],[-44,18],[-40,28],[-30,28],[-25,32],[-17.75,6.75],[-15.25,3.25],
     [22,-25],[25,-20],[20,-17],[27,-13],[44,-18],[43,-8],[44,7],[40,15],[37,29],[29,32],[20,32]];
   const mountainTrees=treeCandidates.filter(([x,z])=>!allMountainPaths.some(p=>profileAt(x,z,p.points).distance<p.width/2+1.25)&&
     !mountainStones.some(s=>Math.abs(x-s.position[0])<s.size[0]/2+1&&Math.abs(z-s.position[2])<s.size[2]/2+1));
   const woodlandTrees=mountainTrees.map(([x,z],i)=>{
     const kind=i%3===0?'pine':'broadleaf',scale=kind==='pine'?1.05+(i%5)*.07:.78+(i%5)*.09;
     const y=Math.min(...[-.22,0,.22].flatMap(a=>[-.22,0,.22].map(b=>mountainSample(x+a*scale,z+b*scale))))-.025;
-    return {position:[x,y,z],scale,kind,yaw:i*.67,seed:930+i};
+    const ridge=x===-17.75||x===-15.25;
+    return {position:[x,y,z],scale,kind,yaw:i*.67,seed:930+i,...(ridge?{litterRadius:2.2,litterCount:26,litterSlope:.95}: {})};
   });
-  place('mountain-woodland','mountainWoodland',mountainRoot,{trees:woodlandTrees},woodlandTrees.map(t=>
+  place('mountain-woodland','mountainWoodland',mountainRoot,{trees:woodlandTrees,bounds:mountain.bounds,columns:mountain.columns,rows:mountain.rows,heights:mountain.heights},woodlandTrees.map(t=>
     box([.48*t.scale,3*t.scale,.48*t.scale],[t.position[0],t.position[1]+1.5*t.scale,t.position[2]])));
-  mountain.woodland=mountainTrees.map(([x,z])=>[x,z,3.4]);
-  mountain.soilPatches.push(...mountainTrees.map(([x,z])=>({center:[x,z],radius:[2.5,2.1],strength:.74})));
+  mountain.woodland=woodlandTrees.map(t=>[t.position[0],t.position[2],3.1*t.scale,t.kind]);
+  mountain.soilPatches.push(...mountainTrees.map(([x,z])=>({center:[x,z],radius:[2.5,2.1],strength:.46})));
   // 背景只在东北区域外侧延续山势, 与可玩山体边界取相同剖面; 不新增身体或射线碰撞.
   place('mountain-distant-ridges','coastalRidges',mountainRoot,{...mountain,relief:.68,north:mountain.heights.slice(-101),east:Array.from({length:77},(_,j)=>mountain.heights[j*101+100])});
   const mountainPlants={...mountain,exclusions:[...mountain.exclusions,...mountainStones.map(({position:[x,,z],size:[w,,d]})=>[x-w/2,z-d/2,x+w/2,z+d/2])]};
   place('mountain-litter','mountainLitter',mountainRoot,{...mountainPlants,trees:woodlandTrees});
-  place('mountain-grass','mountainGrass',mountainRoot,{...mountainPlants,spacing:.43,maxShort:8500,maxTall:400});
+  place('mountain-grass','mountainGrass',mountainRoot,{...mountainPlants,spacing:.43,maxShort:8400,maxTall:400});
   place('mountain-groundcover','mountainGroundcover',mountainRoot,{...mountainPlants,
     zones:[...mountainTrees.map(([x,z])=>({kind:'fern',center:[x,z],radius:4.1,count:13})),
+      ...woodlandTrees.filter(t=>t.litterRadius).flatMap(t=>[
+        {kind:'fern',center:[t.position[0],t.position[2]],radius:1.85,count:14,maxSlope:.95},
+        {kind:'scrub',center:[t.position[0]-.7,t.position[2]+.45],radius:1.65,count:7,maxSlope:.95}]),
       ...[[-35,-17],[-16,-17],[18,-5],[-23,29],[37,23],[9,30]].map(center=>({kind:'scrub',center,radius:4,count:18})),
       ...[[-31,-28],[18,-28],[-44,-10],[43,-10],[40,26],[-26,31]].map(center=>({kind:'flower',center,radius:3,count:12}))]});
   regionPlan.corners[2].routes={paths:mountainPaths.map(p=>({...p,points:p.points.map(mountainWorld)})),links:mountainLinks.map(p=>({...p,points:p.points.map(mountainWorld)})),nodes:mountainNodes.map(n=>({...n,position:mountainWorld(n.position)})),ridges:mountainRidges.map(p=>({...p,points:p.points.map(mountainWorld)})),summitY:26.4,peakY:Math.max(Math.max(...mountain.heights),...mountainStones.map(s=>s.position[1]+s.size[1])),stairs:mountainStairs.map(({localA,localB,...r})=>r),rails:mountainRails,
@@ -1100,6 +1152,10 @@
   place('summer-clouds', 'coastalSky', [0, 0, 0], { steps: 48, sun });
   place('sun-rays', 'sunRays', [0, 0, 0], { sun, samples: 32, strength: .65 });
   place('character-shadows', 'characterShadows', [0, 0, 0], { sun });
+  place('park-ground-shadow-cache', 'groundShadowCache', [0, 0, 0], {
+    bounds: [-49.3, 78, 49.3, 153.4], resolution: 2048,
+    receivers: ['northwest-park-ground', 'park-soft-landforms'], followers: ['park-forest-floor']
+  });
   place('seagull-flocks', 'seagullFlock', [0, 0, 0]);
   // 花带止于楼梯和侧向通道前, 复用低石花坛; 土面高 .1 米, 花根略埋入土中.
   for (const [id, x, z, length, bedWidth] of [
@@ -1176,6 +1232,7 @@
       sunlightShaft: 'models/sunlight-shaft.js',
       sunRays: 'models/sun-rays.js',
       characterShadows: 'models/character-shadows.js',
+      groundShadowCache: 'models/ground-shadow-cache.js',
       japaneseCottage: 'models/japanese-cottage.js', japaneseMachiya: 'models/japanese-machiya.js', japaneseResidence: 'models/japanese-residence.js',
       japaneseYard: 'models/japanese-yard.js',
       residentialMailbox: 'models/residential-mailbox.js', pottedShrub: 'models/potted-shrub.js', balconyLaundry: 'models/balcony-laundry.js',
@@ -1196,9 +1253,9 @@
     preview: { position: [.6, height + 2.6, 29], target: [-.5, 3.25, -12] },
     atmosphere: { sky: 0xa6cbdc, fogNear: 130, fogFar: 1800, exposure: .94, cameraFar: 8000, fov: 64, pixelRatio: 1.5 },
     lights: [
-      { type: 'hemisphere', sky: 0xc8e5f4, ground: 0x8c8065, intensity: 1.15, position: [0, 25, 0] },
+      { type: 'hemisphere', sky: 0xc8e5f4, ground: 0x8c8065, intensity: .72, position: [0, 25, 0] },
       // 全图共用太阳与静态阴影缓存, 保持太阳方向和 4096 图, 覆盖东侧码头且不增加投影光源.
-      { type: 'sun', color: 0xffedce, intensity: 3.15, position: [-48, 89.4, -16], target: [60, 2.4, 68], shadow: true, shadowExtent: 140, shadowFar: 320, shadowSize: 4096, shadowBias: -.0002, staticShadow: true }
+      { type: 'sun', color: 0xffedce, intensity: 3.15, position: [-48, 89.4, -16], target: [60, 2.4, 68], shadow: true, shadowExtent: 140, shadowFar: 320, shadowSize: 4096, shadowBias: -.000015, shadowNormalBias: .008, staticShadow: true }
     ],
     instances
   };

@@ -15,7 +15,7 @@ try {
     ['stone-lantern', 'stoneLantern', {}, 2],
     ['japanese-yard', 'japaneseYard', { seed: 94 }, 2],
     ['sakura-tree', 'sakuraTree', { seed: 702 }, 2], ['zelkova-tree', 'zelkovaTree', { seed: 701 }, 2],
-    ['park-tree', 'parkTree', { seed: 511, spread: 1.12 }, 2],
+    ['park-tree', 'parkTree', { seed: 511, spread: 1.12 }, 3],
     ['park-bamboo', 'parkBamboo', { culms: [{ foot: [0, 0, 0], height: 6, radius: .065, lean: [.2, -.2], seed: 3 }] }, 3],
     ['park-bamboo', 'parkBamboo', { clumps: [[0, 0, 1.4, 13, 6, 0]] }, 3],
     ['park-pond', 'parkPond', { width: 20, depth: 20, bottom: -.55, waterLevel: -.18, rim: .024, shore: Array.from({ length: 40 }, (_, i) => [8 * Math.cos(i * Math.PI / 20), 8 * Math.sin(i * Math.PI / 20)]) }, 2],

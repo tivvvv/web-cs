@@ -55,12 +55,13 @@ FPS.models.mountainGroundcover = (T, o = {}) => {
       const angle=random()*Math.PI*2,r=Math.sqrt(random())*zone.radius,x=zone.center[0]+Math.cos(angle)*r,z=zone.center[1]+Math.sin(angle)*r;
       if(x<x0+.8||x>x1-.8||z<z0+.8||z>z1-.8||(o.exclusions??[]).some(([a,b,c,d])=>x>a-.68&&x<c+.68&&z>b-.68&&z<d+.68))continue;
       if((o.paths??[]).some(path=>path.points.slice(1).some((b,i)=>{const a=path.points[i],dx=b[0]-a[0],dz=b[2]-a[2],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[2])*dz)/(dx*dx+dz*dz)));return Math.hypot(x-a[0]-dx*t,z-a[2]-dz*t)<path.width/2+.7;})))continue;
-      const y=surface(x,z),slope=Math.hypot(surface(x+.25,z)-surface(x-.25,z),surface(x,z+.25)-surface(x,z-.25))*2;
-      if(slope>.45)continue;points.push([x,y-.035,z,.7+random()*.45,random()*Math.PI*2]);
+      const y=surface(x,z),sx=(surface(x+.25,z)-surface(x-.25,z))*2,sz=(surface(x,z+.25)-surface(x,z-.25))*2;
+      if(Math.hypot(sx,sz)>(zone.maxSlope??.45))continue;
+      points.push([x,y-.035,z,.7+random()*.45,random()*Math.PI*2,new T.Vector3(-sx,1,-sz).normalize()]);
     }
     if(!points.length)continue;
     const mesh=new T.InstancedMesh(plant(kind),new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}),points.length),pose=new T.Object3D();
-    const tint=new T.Color();points.forEach(([x,y,z,s,yaw],i)=>{pose.position.set(x,y,z);pose.rotation.set(0,yaw,0);pose.scale.setScalar(s);pose.updateMatrix();mesh.setMatrixAt(i,pose.matrix);tint.set(kind==='flower'?0xe4dfcf:0xcbd1b3).multiplyScalar(.91+random()*.12);mesh.setColorAt(i,tint);});
+    const tint=new T.Color(),up=new T.Vector3(0,1,0);points.forEach(([x,y,z,s,yaw,normal],i)=>{pose.position.set(x,y,z);pose.quaternion.setFromUnitVectors(up,normal);pose.rotateY(yaw);pose.scale.setScalar(s);pose.updateMatrix();mesh.setMatrixAt(i,pose.matrix);tint.set(kind==='flower'?0xe4dfcf:0xcbd1b3).multiplyScalar(.91+random()*.12);mesh.setColorAt(i,tint);});
     mesh.name='mountain-'+kind;mesh.receiveShadow=true;mesh.raycast=()=>{};root.add(mesh);
   }
   return {root};

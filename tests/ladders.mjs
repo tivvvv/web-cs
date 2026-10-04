@@ -14,7 +14,7 @@ vm.runInContext(`
   const player={position:new T.Vector3(),debug:false}; player.body={root:player,radius:.32,height:1.75,vy:0,grounded:false};
   let yaw=0,pitch=0,walk=0,weapon,renderEffect; const api={spawn:new T.Vector3(78,2.4,44)}, $=id=>hints[id]??=( {} );
   ${html.slice(html.indexOf('const STEP_HEIGHT'), html.indexOf('function separateBodies()'))}
-  ${html.slice(html.indexOf('function createInstance(data)'), html.indexOf('function toggleEnemies()'))}
+  ${html.slice(html.indexOf('function createInstance('), html.indexOf('function toggleEnemies()'))}
   ${html.slice(html.indexOf('function updatePlayer(dt)'), html.indexOf('function showMenu('))}
   globalThis.test={T,scene,solid,actors,entries,ladders,keys,player,hints,createInstance,updatePlayer,fall,blockedAt,physicalBodies,nearbyLadder,
     face:n=>{yaw=Math.atan2(n.x,n.z);},buildClimbRoutes};

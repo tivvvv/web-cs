@@ -115,7 +115,7 @@ FPS.models.coastalSky = (T, options = {}) => {
     beforeRender(renderer, scene) {
       if(owner || !root.visible) return;
       owner=scene;previous=scene.environment;previousIntensity=scene.environmentIntensity;
-      scene.environment=environment;scene.environmentIntensity=.48;
+      scene.environment=environment;scene.environmentIntensity=options.environmentIntensity ?? .38;
     },
     dispose() {
       if(owner?.environment===environment){owner.environment=previous;owner.environmentIntensity=previousIntensity;}
