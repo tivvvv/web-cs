@@ -1,11 +1,13 @@
 // 木箱局部范围为 1.6 米立方体, 原点在底面中心, 木板和斜撑均由几何体生成.
 FPS.models.crate = T => {
   const root = new T.Group(), wood = new T.MeshStandardMaterial({ color: 0x9c693b, roughness: .95 });
-  const trim = new T.MeshStandardMaterial({ color: 0xc39258, roughness: .9 });
+  const trim = new T.MeshStandardMaterial({ color: 0xc39258, roughness: .9 }), parts = new Map();
   function box(parent, size, position, material, angle = 0) {
     const mesh = new T.Mesh(new T.BoxGeometry(...size), material);
     mesh.position.set(...position); mesh.rotation.z = angle;
-    mesh.castShadow = mesh.receiveShadow = true; parent.add(mesh);
+    parent.updateMatrixWorld(true); mesh.updateMatrix();
+    mesh.geometry.applyMatrix4(mesh.matrix).applyMatrix4(parent.matrixWorld);
+    if (!parts.has(material)) parts.set(material, []); parts.get(material).push(mesh.geometry);
   }
   box(root, [1.44, 1.52, 1.44], [0, .76, 0], wood);
   for (let side = 0; side < 4; side++) {
@@ -16,5 +18,10 @@ FPS.models.crate = T => {
     box(face, [1.72, .13, .016], [0, 0, .792], trim, Math.PI / 4);
   }
   for (let i = 0; i < 6; i++) box(root, [.255, .08, 1.6], [(i - 2.5) * .266, 1.56, 0], trim);
+  root.clear();
+  for (const [material, list] of parts) {
+    const mesh = new T.Mesh(T.mergeGeometries(list), material); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh);
+    list.forEach(g => g.dispose());
+  }
   return { root };
 };

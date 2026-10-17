@@ -1,6 +1,6 @@
 // 仓库货架与托盘货物. 木纤维, 包装接缝和标识自包含, 四材质静态合批.
 FPS.models.portCargoWorkarea = (T, o = {}) => {
-  const root = new T.Group(), parts = [[], [], [], []], pose = new T.Object3D(); let matrix = new T.Matrix4();
+  const root = new T.Group(), parts = [[], [], [], []], pose = new T.Object3D(); let matrix = new T.Matrix4(), film=false;
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
   const ctx = canvas.getContext('2d'), data = ctx.createImageData(256, 256); let seed = 935;
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
@@ -21,7 +21,9 @@ FPS.models.portCargoWorkarea = (T, o = {}) => {
     if (batch === 0) { const uv = g.attributes.uv, n = g.attributes.normal, p = g.attributes.position; for (let i = 0; i < uv.count; i++) uv.setXY(i, Math.abs(n.getX(i)) > .5 ? p.getZ(i) * 1.6 : p.getX(i) * 1.6, p.getY(i) * .4 + p.getZ(i) * .3); }
     g.applyMatrix4(matrix); const c = new T.Color(color), rgb = [];
     for (let i = 0; i < g.attributes.position.count; i++) rgb.push(c.r, c.g, c.b);
-    g.setAttribute('color', new T.Float32BufferAttribute(rgb, 3)); parts[batch].push(g);
+    g.setAttribute('color', new T.Float32BufferAttribute(rgb, 3));
+    if(batch===2)g.setAttribute('wrapFilm',new T.Float32BufferAttribute(new Float32Array(g.attributes.position.count).fill(film?1:0),1));
+    parts[batch].push(g);
   }
   const box = (s, p, c = 0xb2a27e, batch = 0, r) => add(new T.BoxGeometry(...s), c, batch, p, r);
   const cyl = (radius, length, p, c, batch = 1, r = [0, 0, 0], n = 16) => add(new T.CylinderGeometry(radius, radius, length, n), c, batch, p, r);
@@ -60,11 +62,8 @@ FPS.models.portCargoWorkarea = (T, o = {}) => {
         for (const z of [-d * .36, d * .36]) box([.055, h - base, .09], [side * (w / 2 + .012), (h + base) / 2, z], 0x8c7b5b);
       }
     } else {
-      box([w - .04, h - base, d - .04], [0, (h + base) / 2, 0], c, 2);
-      // 缠膜横向接缝与两道捆扎带, 用克制的色差表现薄膜, 无透明排序.
-      for (let y = base + .15; y < h - .07; y += .14) {
-        for (const side of [-1, 1]) { box([w - .035, .014, .009], [0, y, side * (d / 2 - .011)], 0xaab7a5, 2); box([.009, .014, d - .035], [side * (w / 2 - .011), y, 0], 0xaab7a5, 2); }
-      }
+      film=true;box([w-.04,h-base,d-.04],[0,(h+base)/2,0],c,2);film=false;
+      // 缠膜接缝由材质按像素覆盖过滤, 不再沿货物四面堆亚厘米薄条.
       for (const x of [-w * .28, w * .28]) {
         box([.045, .018, d], [x, h + .006, 0], 0x536b62, 1);
         for (const side of [-1, 1]) box([.045, h - base, .018], [x, (h + base) / 2, side * d / 2], 0x536b62, 1);
@@ -105,6 +104,14 @@ FPS.models.portCargoWorkarea = (T, o = {}) => {
   }
   const materials = [new T.MeshStandardMaterial({ map: wood, bumpMap: wood, bumpScale: .002, vertexColors: true, roughness: .88 }),
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .66, metalness: .42 }), new T.MeshStandardMaterial({ vertexColors: true, roughness: .54, metalness: .05 }), new T.MeshStandardMaterial({ map: label, vertexColors: true, roughness: .86 })];
+  materials[2].onBeforeCompile=shader=>{
+    shader.vertexShader='attribute float wrapFilm; varying vec2 vWrapFilm;\n'+shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvWrapFilm=vec2(position.y,wrapFilm*(1.-abs(normal.y)));');
+    shader.fragmentShader='varying vec2 vWrapFilm;\n'+shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+      float filmPhase=vWrapFilm.x/.14;
+      float filmResolved=1.-smoothstep(.15,.6,fwidth(filmPhase));
+      float filmSeam=smoothstep(.93,.98,.5+.5*cos(filmPhase*6.2831853))-.04;
+      diffuseColor.rgb*=1.-vWrapFilm.y*filmSeam*filmResolved*.06;`);
+  };materials[2].customProgramCacheKey=()=> 'port-wrap-seams-v1';
   parts.forEach((p, i) => { if (!p.length) return; const mesh = new T.Mesh(T.mergeGeometries(p), materials[i]); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); p.forEach(g => g.dispose()); });
-  return { root, dispose() { wood.dispose(); label.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true; wood.dispose(); label.dispose(); } };
 };

@@ -46,11 +46,15 @@ FPS.models.portReachstacker = (T, o = {}) => {
     box([.12, .08, .31], [side * 1.18, 2.62, -.84], steel, 2);
     box([.17, .38, .26], [side * 1.48, 3.35, .34], dark, 1);
     beam([side * 1.07, 3.38, .16], [side * 1.47, 3.38, .34], .035, .035, steel, 2);
+    box([.12,.25,.014],[side*1.48,3.35,.20],0xa8c0b6,3);
     for (let i = 0; i < 3; i++) box([.42, .12, .6], [side * 1.32, .4 + i * .38, -.7], 0x697d72, 2);
     beam([side * 1.6, .75, -1.11], [side * 1.6, 2.52, -1.11], .04, .04, steel, 2);
   }
   for (const z of [-1.57, .37]) box([1.94, 1.08, .055], [0, 3.14, z], 0x365c63, 3);
   box([.075, 1.16, .095], [0, 3.14, .405], 0xc2c3a5, 2);
+  // 雨刷避开中挺, 反射镜片退在镜壳边缘内, 不另开透明或反射渲染.
+  beam([.18,2.69,.419],[.57,3.23,.419],.016,.014,dark,1);
+  beam([.42,2.98,.422],[.66,3.32,.422],.025,.014,dark,1);
   rounded([2.4, .14, 2.15], [0, 3.86, -.6], 0xc3c5ad);
   cylinder(.105, .17, [.8, 4.01, -.95], 0xe9af43, 0);
   // 两段箱形臂和两侧液压缸构成真实机械轮廓; 吊具停在作业区上方.
@@ -59,9 +63,9 @@ FPS.models.portReachstacker = (T, o = {}) => {
   for (const side of [-1, 1]) {
     const a = [side * .6, 1.66, 1.45], b = [side * .6, 4.22, 2.62], c = [side * .6, 5.01, 3.2];
     beam(a, b, .23, .23, 0x596d63, 2); beam(b, c, .105, .105, 0xc6c9b3, 2);
-    cylinder(.21, 1.5, [0, 2.12, 1.05], 0x455d5c, 2, [0, 0, Math.PI / 2]);
     beam([side * .38, 4.05, 2.33], [side * .38, 5.99, 4.87], .042, .042, 0x283b39, 1);
   }
+  cylinder(.21, 1.5, [0, 2.12, 1.05], 0x455d5c, 2, [0, 0, Math.PI / 2]);
   cylinder(.27, .36, tip, 0x4c6362, 2);
   box([2.58, .28, .62], [0, 6.1, 5.4], 0x9b814b);
   box([.58, .26, 3], [0, 5.89, 5.4], 0x546b68, 2);
@@ -89,5 +93,5 @@ FPS.models.portReachstacker = (T, o = {}) => {
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .5, metalness: .66 }), new T.MeshStandardMaterial({ vertexColors: true, roughness: .22, metalness: .42 }), new T.MeshStandardMaterial({ map, vertexColors: true, roughness: .68, metalness: .2 })];
   for (const i of [0, 2]) { materials[i].map = materials[i].bumpMap = materials[i].roughnessMap = grain; materials[i].bumpScale = .0015; }
   parts.forEach((p, i) => { const mesh = new T.Mesh(T.mergeGeometries(p), materials[i]); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); p.forEach(g => g.dispose()); });
-  return { root, dispose() { map.dispose(); grain.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true; map.dispose(); grain.dispose(); } };
 };

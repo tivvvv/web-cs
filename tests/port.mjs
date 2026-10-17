@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
+import {Triangle} from 'three';
 
 const read = file => readFileSync(new URL('../' + file, import.meta.url), 'utf8');
 const document = { createElement(name) {
@@ -20,8 +21,8 @@ const before = vm.createContext({ window: {} });
 vm.runInContext(execFileSync('git', ['show', 'HEAD:scene-kamakura.js'], { encoding: 'utf8' }), before);
 const json = value => JSON.stringify(value);
 for (const old of before.window.FPS_LAYOUT.instances) {
-  // 山区改动由 mountain/mountain-detail 回归覆盖, 此处保护车站/公园/连接区.
-  if (old.id.startsWith('port-') || old.id.startsWith('mountain-') || ['reserved-district-ground', 'sagami-bay', 'coastal-beach'].includes(old.id)) continue;
+  // 山区/中央改动由各自回归覆盖, 此处保护已定型车站和公园.
+  if (old.id.startsWith('port-') || old.id.startsWith('mountain-') || old.id.startsWith('central-') || ['reserved-district-ground', 'sagami-bay', 'coastal-beach'].includes(old.id)) continue;
   const current = layout.instances.find(i => i.id === old.id);
   assert.equal(json(current), json(old), old.id + ' 被意外修改');
 }
@@ -244,6 +245,23 @@ function unitPoint(u, p) {
   return new T.Vector3(...p).applyMatrix4(pose.matrix).applyMatrix4(cargo.instance.root.matrixWorld);
 }
 function unitDirection(u, sign) { return new T.Vector3(Math.sin(u.yaw) * sign, 0, Math.cos(u.yaw) * sign); }
+const inkMesh=cargo.meshes.find(n=>n.name==='cargo-print'),inkShader={vertexShader:'#include <begin_vertex>',fragmentShader:'#include <map_fragment>',uniforms:{}};
+inkMesh.material.onBeforeCompile(inkShader);
+assert.equal(inkMesh.material.alphaTest,0);assert(!inkMesh.material.transparent&&inkMesh.castShadow&&inkMesh.receiveShadow);
+assert(inkShader.fragmentShader.includes('1.-vCargoPrint.y')&&inkShader.fragmentShader.includes('mix(diffuseColor.rgb,ink.rgb,ink.a*inkMask.x*inkMask.y)'),'印字缺少方向/覆盖率混合');
+assert.equal(inkShader.uniforms.cargoInk.value.colorSpace,T.SRGBColorSpace);
+const attribute=inkMesh.geometry.attributes.cargoPrint,positions=inkMesh.geometry.attributes.position;
+assert(attribute&&attribute.count===positions.count,'印字没有使用真实波纹面属性');
+for(const [id,u]of cargo.data.options.units.entries())for(const sign of [-1,1])for(const y of [1.2,1.75,2.3]) {
+ const direction=new T.Vector3(-sign,0,0).applyAxisAngle(new T.Vector3(0,1,0),u.yaw??0);
+ ray.set(unitPoint(u,[sign*(u.width/2+.15),y,-.2]),direction);ray.near=0;ray.far=.25;
+ const hit=ray.intersectObject(inkMesh)[0];assert(hit,'货柜两侧印字面存在孔洞');
+ const local=inkMesh.worldToLocal(hit.point.clone()),corners=[hit.face.a,hit.face.b,hit.face.c].map(i=>new T.Vector3().fromBufferAttribute(positions,i)),bary=Triangle.getBarycoord(local,...corners,new T.Vector3());
+ const print=new T.Vector3();[hit.face.a,hit.face.b,hit.face.c].forEach((index,i)=>print.addScaledVector(new T.Vector3().fromBufferAttribute(attribute,index),bary.getComponent(i)));
+ assert(Math.abs(print.x-.5)<1e-5&&Math.abs(print.y-(y-1.075)/1.35)<1e-5&&Math.abs(print.z-id%4)<1e-5,'箱体旋转后标签投影错位');
+ assert(hit.distance>.165&&hit.distance<.192,'印字仍悬在箱体外');
+}
+console.log('PASS 26 箱两侧真实波纹印字/旋转定位/正常朝向/不透明覆盖率, 无悬空贴片');
 for (const u of opened) {
   for (const sign of u.openEnds) {
     const outside = unitPoint(u, [0, .1, sign * (u.length / 2 + 1)]), inside = unitPoint(u, [0, u.skin.floor, 0]);
@@ -286,7 +304,7 @@ console.log('PASS 六个开门箱进出, 双开箱穿行/射击, 内部背墙和
 const original = T.Mesh.prototype.raycast;
 function compareRay(origin, direction) {
   ray.set(origin, direction); ray.near = 0; ray.far = 200;
-  for (const mesh of cargo.meshes.filter(n => n.name !== 'cargo-print')) {
+  for (const mesh of cargo.meshes) {
     const fast = [], reference = []; mesh.raycast(ray, fast); original.call(mesh, ray, reference);
     fast.sort((a, b) => a.distance - b.distance || a.faceIndex - b.faceIndex); reference.sort((a, b) => a.distance - b.distance || a.faceIndex - b.faceIndex);
     assert.equal(fast.length, reference.length, '逐箱射线遗漏');
@@ -319,7 +337,7 @@ function rayCost(optimized) {
   const start = performance.now();
   for (let i = 0; i < 260; i++) {
     ray.set(samples[i % samples.length], new T.Vector3(-1, 0, 0)); ray.near = .025; ray.far = 100;
-    for (const mesh of cargo.meshes.filter(n => n.name !== 'cargo-print')) (optimized ? mesh.raycast : original).call(mesh, ray, []);
+    for (const mesh of cargo.meshes) (optimized ? mesh.raycast : original).call(mesh, ray, []);
   }
   return (performance.now() - start) / 260;
 }
@@ -343,8 +361,9 @@ let disposedMaps = 0;
 for (const model of models) {
   const privateMaps = new Set(), released = new Set();
   model.meshes.forEach(mesh => Object.values(mesh.material).forEach(value => { if (value?.isTexture) privateMaps.add(value); }));
+  if(model===cargo)privateMaps.add(inkShader.uniforms.cargoInk.value);
   privateMaps.forEach(map => map.addEventListener('dispose', () => released.add(map)));
-  model.instance.dispose?.(); assert.equal(released.size, privateMaps.size, model.data.model + ' 未释放私有纹理'); disposedMaps += released.size;
+  model.instance.dispose?.(); if(model===cargo)model.instance.dispose(); assert.equal(released.size, privateMaps.size, model.data.model + ' 未释放私有纹理'); disposedMaps += released.size;
   const geometries = new Set(), materials = new Set();
   model.instance.root.traverse(n => { if (n.geometry) geometries.add(n.geometry); if (n.material) (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => materials.add(m)); });
   geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose());

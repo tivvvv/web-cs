@@ -3,6 +3,9 @@ FPS.models.mountainGroundcover = (T, o = {}) => {
   const root=new T.Group(),[x0,z0,x1,z1]=o.bounds??[-50,-38,50,38],cols=o.columns??2,rows=o.rows??2;
   const heights=o.heights??[2.4,2.4,2.4,2.4],dx=(x1-x0)/(cols-1),dz=(z1-z0)/(rows-1);
   let seed=o.seed??407;const random=()=>((seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296);
+  const segments=(o.paths??[]).flatMap(path=>path.points.slice(1).map((b,i)=>{
+    const a=path.points[i],x=b[0]-a[0],z=b[2]-a[2];return {a,x,z,length:x*x+z*z,clearance:(path.width/2+.7)**2};
+  }));
   function surface(x,z) {
     const u=Math.max(0,Math.min(cols-1,x/dx-x0/dx)),v=Math.max(0,Math.min(rows-1,z/dz-z0/dz));
     const i=Math.min(cols-2,Math.floor(u)),j=Math.min(rows-2,Math.floor(v)),a=u-i,b=v-j,k=j*cols+i,h=heights;
@@ -54,15 +57,23 @@ FPS.models.mountainGroundcover = (T, o = {}) => {
     for(const zone of o.zones??[]) if(zone.kind===kind) for(let i=0;i<(zone.count??12);i++) {
       const angle=random()*Math.PI*2,r=Math.sqrt(random())*zone.radius,x=zone.center[0]+Math.cos(angle)*r,z=zone.center[1]+Math.sin(angle)*r;
       if(x<x0+.8||x>x1-.8||z<z0+.8||z>z1-.8||(o.exclusions??[]).some(([a,b,c,d])=>x>a-.68&&x<c+.68&&z>b-.68&&z<d+.68))continue;
-      if((o.paths??[]).some(path=>path.points.slice(1).some((b,i)=>{const a=path.points[i],dx=b[0]-a[0],dz=b[2]-a[2],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[2])*dz)/(dx*dx+dz*dz)));return Math.hypot(x-a[0]-dx*t,z-a[2]-dz*t)<path.width/2+.7;})))continue;
+      if(segments.some(s=>{const px=x-s.a[0],pz=z-s.a[2],t=s.length?Math.max(0,Math.min(1,(px*s.x+pz*s.z)/s.length)):0;return (px-s.x*t)**2+(pz-s.z*t)**2<s.clearance;}))continue;
       const y=surface(x,z),sx=(surface(x+.25,z)-surface(x-.25,z))*2,sz=(surface(x,z+.25)-surface(x,z-.25))*2;
       if(Math.hypot(sx,sz)>(zone.maxSlope??.45))continue;
       points.push([x,y-.035,z,.7+random()*.45,random()*Math.PI*2,new T.Vector3(-sx,1,-sz).normalize()]);
     }
     if(!points.length)continue;
     const mesh=new T.InstancedMesh(plant(kind),new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide}),points.length),pose=new T.Object3D();
-    const tint=new T.Color(),up=new T.Vector3(0,1,0);points.forEach(([x,y,z,s,yaw,normal],i)=>{pose.position.set(x,y,z);pose.quaternion.setFromUnitVectors(up,normal);pose.rotateY(yaw);pose.scale.setScalar(s);pose.updateMatrix();mesh.setMatrixAt(i,pose.matrix);tint.set(kind==='flower'?0xe4dfcf:0xcbd1b3).multiplyScalar(.91+random()*.12);mesh.setColorAt(i,tint);});
+    const tint=new T.Color(),up=new T.Vector3(0,1,0),base=new T.Vector3(),vertices=mesh.geometry.attributes.position,roots=[];
+    for(let j=0;j<vertices.count;j++)if(vertices.getY(j)<.001)roots.push(j);
+    points.forEach(([x,y,z,s,yaw,normal],i)=>{
+      pose.position.set(x,y,z);pose.quaternion.setFromUnitVectors(up,normal);pose.rotateY(yaw);pose.scale.setScalar(s);pose.updateMatrix();
+      // 各叶基分别取真实三角面高度, 防止跨网格折线时只埋入中心, 两侧仍悬空.
+      let bury=0;for(const j of roots){base.fromBufferAttribute(vertices,j).applyMatrix4(pose.matrix);bury=Math.max(bury,base.y-surface(base.x,base.z)+.003);}
+      pose.position.y-=bury;pose.updateMatrix();mesh.setMatrixAt(i,pose.matrix);
+      tint.set(kind==='flower'?0xe4dfcf:0xcbd1b3).multiplyScalar(.91+random()*.12);mesh.setColorAt(i,tint);
+    });
     mesh.name='mountain-'+kind;mesh.receiveShadow=true;mesh.raycast=()=>{};root.add(mesh);
   }
-  return {root};
+  let disposed=false;return {root,dispose(){if(disposed)return;disposed=true;root.children.forEach(mesh=>mesh.dispose());}};
 };

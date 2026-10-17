@@ -630,21 +630,30 @@ function dispose(root) {
   geometries.forEach(g => g.dispose()); materials.forEach(m => m.dispose()); root.removeFromParent();
 }
 const disabledEffects = new Set();
+function releaseEffect(e) {
+  if (e.released) return; e.released = true;
+  guarded('特效 ' + e.name + ' 清理', () => e.dispose?.()); dispose(e.root);
+}
 function effect(name, options) {
   if (!FPS.models[name] || disabledEffects.has(name)) return;
+  let e;
   try {
-    const e = FPS.models[name](T, options); if (!e?.root?.isObject3D) throw Error('模型未返回 root');
+    e = FPS.models[name](T, options); if (!e?.root?.isObject3D) throw Error('模型未返回 root');
     if (e.update !== undefined && typeof e.update !== 'function') throw Error('特效更新接口必须为函数');
+    if (e.dispose !== undefined && typeof e.dispose !== 'function') throw Error('特效清理接口必须为函数');
     e.duration ??= .1;
     if (!Number.isFinite(e.duration) || e.duration <= 0) throw Error('特效时长必须为正数');
     e.left = e.duration; e.name = name; e.rendered = false;
     if (options.view) e.root.traverse(n => n.layers.set(1));
     scene.add(e.root); if (options.parent) options.parent.attach(e.root);
     if (options.limit && effects.filter(item => item.name === name).length >= options.limit) {
-      const oldest = effects.findIndex(item => item.name === name); dispose(effects[oldest].root); effects.splice(oldest, 1);
+      const oldest = effects.findIndex(item => item.name === name); releaseEffect(effects[oldest]); effects.splice(oldest, 1);
     }
     effects.push(e);
-  } catch (error) { disabledEffects.add(name); report('特效 ' + name, error); }
+  } catch (error) {
+    if (e?.root?.isObject3D) releaseEffect(e);
+    disabledEffects.add(name); report('特效 ' + name, error);
+  }
 }
 let soundOutput, shotNoise;
 // 共用包络与输出, 播放结束后断开节点, 连射不会积累音频连接.
@@ -823,8 +832,13 @@ function createInstance(data, assets) {
   if (instance.debugMeshes !== undefined && (!Array.isArray(instance.debugMeshes) || instance.debugMeshes.some(n => !n?.isObject3D))) throw Error('调试网格必须为 Object3D 数组');
   if (instance.render) { if (renderEffect) throw Error('每个场景只允许一个渲染模块'); renderEffect = instance; }
   const root = instance.root; root.position.set(...position); root.rotation.set(...rotation); root.scale.set(...scale);
-  // 预计算局部包围盒, 让射线先排除未穿过的网格, 避免视线检测遍历整片地面三角形.
-  root.traverse(n => { if (n.isMesh && !n.geometry.boundingBox) n.geometry.computeBoundingBox(); });
+  // 射线与视锥包围体都在装配时准备; 不把实例包围球的整批扫描留到玩家首次转身.
+  root.traverse(n => {
+    if (!n.isMesh) return;
+    if (!n.geometry.boundingBox) n.geometry.computeBoundingBox();
+    if (!n.geometry.boundingSphere) n.geometry.computeBoundingSphere();
+    if (n.isInstancedMesh && !n.boundingSphere) n.computeBoundingSphere();
+  });
   root.name = data.id; instance.id = data.id; instance.data = data;
   if (body) { body.root = root; body.spawn = root.position.clone(); instance.body = body; }
   if (instance.bodyWire) { instance.bodyWire.visible = false; scene.add(instance.bodyWire); }
@@ -846,7 +860,7 @@ function toggleEnemies() {
   const removed = new Set(actors);
   for (let i = effects.length - 1; i >= 0; i--) {
     for (let n = effects[i].root; n; n = n.parent) if (removed.has(n.userData.actor)) {
-      dispose(effects[i].root); effects.splice(i, 1); break;
+      releaseEffect(effects[i]); effects.splice(i, 1); break;
     }
   }
   // 敌人共用缓存资源, 只移除实例节点, 不 dispose 仍会用于刷新的共享几何和材质.
@@ -973,14 +987,28 @@ window.addEventListener('blur', () => { pause(); document.exitPointerLock?.(); }
 document.addEventListener('visibilitychange', () => { if (document.hidden) { pause(); document.exitPointerLock?.(); } });
 function formatTime(t) { return `${Math.floor(t / 60).toString().padStart(2, '0')}:${Math.floor(t % 60).toString().padStart(2, '0')}`; }
 function drawMap() {
-  const c = $('map').getContext('2d'), size = 332, k = 4.65, cx = 166, cy = 166;
-  c.clearRect(0, 0, size, size); c.strokeStyle = '#d8e5c715'; c.lineWidth = 1;
-  for (let i = 26; i < size; i += 28) { c.beginPath(); c.moveTo(i, 0); c.lineTo(i, size); c.moveTo(0, i); c.lineTo(size, i); c.stroke(); }
-  c.fillStyle = '#d8e5c739';
-  for (const s of solid) if (s.box.max.y > .5) { const b = s.box; c.fillRect(cx + b.min.x * k, cy + b.min.z * k, (b.max.x - b.min.x) * k, (b.max.z - b.min.z) * k); }
-  c.fillStyle = '#f18c60'; for (const a of actors) if (a.alive && !a.disabled) { c.beginPath(); c.arc(cx + a.root.position.x * k, cy + a.root.position.z * k, 4, 0, Math.PI * 2); c.fill(); }
-  c.save(); c.translate(cx + player.position.x * k, cy + player.position.z * k); c.rotate(-yaw);
-  c.fillStyle = '#e2edba'; c.beginPath(); c.moveTo(0, -8); c.lineTo(-6, 6); c.lineTo(0, 3); c.lineTo(6, 6); c.closePath(); c.fill(); c.restore();
+  if (layout.mode === 'explore' || layout.mode === 'freeplay') return;
+  const c = $('map').getContext('2d'), size = 332, k = 4.65, cx = 166, cy = 166, p = player.position;
+  const originX=cx-p.x*k,originZ=cy-p.z*k,range=size/(2*k);
+  c.clearRect(0,0,size,size);c.strokeStyle='#d8e5c715';c.lineWidth=1;
+  // 雷达随玩家平移, 世界网格保持固定相位; 四区都能看到身边的通路与目标.
+  for(let x=((originX%28)+28)%28;x<size;x+=28){c.beginPath();c.moveTo(x,0);c.lineTo(x,size);c.stroke();}
+  for(let z=((originZ%28)+28)%28;z<size;z+=28){c.beginPath();c.moveTo(0,z);c.lineTo(size,z);c.stroke();}
+  c.fillStyle='#d8e5c739';
+  for(const s of solid){
+    const b=s.box;
+    if(b.heightfield||b.max.y<=p.y+.35||b.min.y>=p.y+1.75||b.max.x<p.x-range||b.min.x>p.x+range||b.max.z<p.z-range||b.min.z>p.z+range)continue;
+    c.fillRect(originX+b.min.x*k,originZ+b.min.z*k,(b.max.x-b.min.x)*k,(b.max.z-b.min.z)*k);
+  }
+  c.fillStyle='#f18c60';
+  for(const a of actors)if(a.alive&&!a.disabled){
+    const q=a.root.position,x=cx+(q.x-p.x)*k,z=cy+(q.z-p.z)*k;
+    if(x<5||x>size-5||z<10||z>size-10)continue;
+    c.beginPath();c.arc(x,z,4,0,Math.PI*2);c.fill();
+    if(Math.abs(q.y-p.y)>2.5){const direction=q.y>p.y?-1:1,tip=z+direction*8;c.beginPath();c.moveTo(x-3,tip-direction*3);c.lineTo(x,tip);c.lineTo(x+3,tip-direction*3);c.strokeStyle='#f3bd85';c.stroke();}
+  }
+  c.save();c.translate(cx,cy);c.rotate(-yaw);
+  c.fillStyle='#e2edba';c.beginPath();c.moveTo(0,-8);c.lineTo(-6,6);c.lineTo(0,3);c.lineTo(6,6);c.closePath();c.fill();c.restore();
 }
 function updateHUD() {
   $('health').textContent = Math.ceil(player.health); $('health-bar').style.width = player.health + '%'; $('ammo').textContent = String(ammo).padStart(2, '0');
@@ -1043,7 +1071,7 @@ function frame(stamp) {
     e.rendered = true; e.left = Math.max(0, e.left - step);
     try { e.update?.(step, 1 - e.left / e.duration); }
     catch (error) { disabledEffects.add(e.name); report('特效更新 ' + e.name, error); e.left = 0; }
-    if (e.left <= 0) { dispose(e.root); effects.splice(i, 1); }
+    if (e.left <= 0) { releaseEffect(e); effects.splice(i, 1); }
   }
   api.flash.intensity *= Math.exp(-dt * 50); hurt = Math.max(0, hurt - (mode === 'paused' ? 0 : dt)); hit = Math.max(0, hit - dt); toastLeft -= dt;
   if (hurt && hurtSource) {
@@ -1070,16 +1098,27 @@ function frame(stamp) {
 // 入场前编译全部材质并上传离屏资源, 转身时不再首次创建纹理和顶点缓冲.
 async function prepareScene() {
   const target = renderer.getRenderTarget(), mask = camera.layers.mask, flags = [];
+  const weaponVisible = weapon?.root.visible, background = scene.background, shadowUpdate = renderer.shadowMap.autoUpdate;
   const buffer = new T.WebGLRenderTarget(32, 32, { type: renderer.extensions.has('EXT_color_buffer_float') ? T.HalfFloatType : undefined });
   try {
-    renderWorld();
+    // 环境与材质补丁先接入, 再异步编译; 提前渲染整个世界会退回同步编译并重复生成程序.
     for (const e of entries) if (e.prepare && !e.disabled) {
       try { await e.prepare(renderer, scene, camera); }
       catch (error) { e.disabled = true; report(e.id + ' 准备', error); guarded(e.id + ' 清理', () => e.dispose?.()); }
     }
     scene.traverse(n => { if (n.isMesh || n.isLine) { flags.push([n, n.frustumCulled]); n.frustumCulled = false; } });
     renderer.setRenderTarget(buffer); await renderer.compileAsync(scene, camera); renderer.render(scene, camera);
-    renderer.setRenderTarget(target); camera.layers.set(1); await renderer.compileAsync(scene, camera);
+    for (const [n, value] of flags) n.frustumCulled = value;
+    renderer.setRenderTarget(target);
+    if (!renderEffect || renderEffect.disabled || !renderer.extensions.has('EXT_color_buffer_float')) await renderer.compileAsync(scene, camera);
+    // 静态太阳图已生成, 现在烘焙地表缓存并准备实际后处理输出.
+    renderWorld();
+    if (weapon && !weapon.disabled) {
+      camera.layers.set(1); scene.background = null; renderer.shadowMap.autoUpdate = false;
+      // compileAsync 不按物体图层过滤材质, 这里只编译武器子树, 避免全地图再次生成屏幕输出版本.
+      await renderer.compileAsync(weapon.root, camera, scene);
+      weapon.root.visible = true; renderer.render(scene, camera);
+    }
     // 等待上传和编译的 GPU 队列完成, 不把延迟带进第一个游戏视角.
     const gl = renderer.getContext(), fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0); gl.flush();
     if (fence) await new Promise((resolve, reject) => {
@@ -1094,6 +1133,8 @@ async function prepareScene() {
     });
   } finally {
     for (const [n, value] of flags) n.frustumCulled = value;
+    if (weapon) weapon.root.visible = weaponVisible;
+    scene.background = background; renderer.shadowMap.autoUpdate = shadowUpdate;
     camera.layers.mask = mask; renderer.setRenderTarget(target); buffer.dispose();
   }
 }

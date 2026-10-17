@@ -47,7 +47,7 @@ FPS.models.portWarehouse = (T, o = {}) => {
   box([.23, .16, d + .86], [0, h + rise + .07, 0], 0x637d7b, 1);
   for (const side of [-1, 1]) {
     const gable = new T.Shape(); gable.moveTo(-w / 2, h); gable.lineTo(0, h + rise); gable.lineTo(w / 2, h); gable.closePath();
-    add(new T.ExtrudeGeometry(gable, { depth: .16, bevelEnabled: false }).translate(0, 0, side * (d / 2 - .08)), 0x899f95);
+    add(new T.ExtrudeGeometry(gable, { depth: .16, bevelEnabled: false }).translate(0, 0, side * d / 2 - .08), 0x899f95);
     box([w + .28, .12, .18], [0, h - .06, side * (d / 2 + .08)], 0x526b6b, 1);
     for (const x of [-w / 2 + .14, w / 2 - .14]) box([.13, h, .13], [x, h / 2, side * (d / 2 + .02)], 0x50666a, 1);
   }
@@ -110,11 +110,15 @@ FPS.models.portWarehouse = (T, o = {}) => {
   const materials = [new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .003, vertexColors: true, roughness: .83, metalness: .12 }),
     new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .002, vertexColors: true, roughness: .65, metalness: .35 }),
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .2, metalness: .4 }), new T.MeshStandardMaterial({ map: floorMap, bumpMap: floorMap, bumpScale: .0008, vertexColors: true, roughness: .92 })];
-  materials[0].customProgramCacheKey = () => 'port-warehouse-weather-v1';
+  materials[0].customProgramCacheKey = () => 'port-warehouse-weather-v2';
   materials[0].onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\n varying vec3 vWarehousePoint;').replace('#include <begin_vertex>', '#include <begin_vertex>\n vWarehousePoint=position;');
     shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\n varying vec3 vWarehousePoint;').replace('#include <map_fragment>', `#include <map_fragment>
-      float seam=max(pow(.5+.5*sin(vWarehousePoint.x*15.),18.),pow(.5+.5*sin(vWarehousePoint.z*15.),18.));
+      vec2 phase=vWarehousePoint.xz*15.;
+      vec2 detail=pow(.5+.5*sin(phase),vec2(18.));
+      vec2 coverage=1.-smoothstep(vec2(.35),vec2(2.5),fwidth(phase));
+      vec2 filtered=mix(vec2(.132),detail,coverage);
+      float seam=max(filtered.x,filtered.y);
       float dirt=exp(-max(0.,vWarehousePoint.y)/.24)*(.08+.13*seam);
       diffuseColor.rgb*=vec3(1.-dirt*.75,1.-dirt,1.-dirt*1.2);`);
   };

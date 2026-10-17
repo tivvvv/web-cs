@@ -27,6 +27,7 @@ FPS.models.portForklift = (T, o = {}) => {
     box([.085, 1.57, .085], [side * .61, 1.66, .48], 0x536c66, 2);
     box([.35, .08, .52], [side * .86, .51, -.29], 0x70837b, 2);
     box([.1, .35, .13], [side * .74, 2.14, .61], 0x283e3c, 1);
+    box([.07,.26,.009],[side*.74,2.14,.54],0xa9c3b3,3);
   }
   box([1.4, .08, 1.66], [0, 2.46, -.15], 0x5e7770, 2);
   for (let z = -.82; z < .62; z += .22) box([1.45, .05, .065], [0, 2.53, z], 0x819187, 2);
@@ -36,7 +37,18 @@ FPS.models.portForklift = (T, o = {}) => {
   for (const x of [-.15, .15]) cyl(.05, .013, [x, 1.58, .52], 0xc3c8b1, 2);
   cyl(.032, .4, [0, 1.55, .37], 0x7d9187, 2, [.45, 0, 0]);
   add(new T.TorusGeometry(.19, .027, 6, 20), 0x263933, 1, [0, 1.77, .24], [1.08, 0, 0]);
-  for (const x of [.38, .49]) cyl(.017, .35, [x, 1.38, .14], 0x899b8e, 2, [.17, 0, 0]);
+  const wheelCenter = new T.Vector3(0, 1.77, .24), wheelRotation = new T.Euler(1.08, 0, 0);
+  for (let i = 0; i < 3; i++) {
+    const a = i * Math.PI * 2 / 3, delta = new T.Vector3(Math.cos(a) * .175, Math.sin(a) * .175, 0).applyEuler(wheelRotation);
+    const spoke = new T.CylinderGeometry(.009, .009, delta.length(), 6);
+    spoke.applyQuaternion(pose.quaternion.setFromUnitVectors(T.Object3D.DEFAULT_UP, delta.clone().normalize())).translate(...wheelCenter.clone().addScaledVector(delta, .5).toArray()); add(spoke, 0x8a9b8c, 2);
+  }
+  add(new T.SphereGeometry(.028, 8, 5), 0x52685e, 2, wheelCenter.toArray());
+  for (const x of [.38, .49]) {
+    cyl(.017, .35, [x, 1.38, .14], 0x899b8e, 2, [.17, 0, 0]);
+    add(new T.SphereGeometry(.037,8,4),0x344c40,1,[x,1.38+Math.cos(.17)*.175,.14+Math.sin(.17)*.175]);
+  }
+  box([.055,.015,.58],[0,1.3275,-.27],0x677359,1);
   // 门架是两侧槽钢, 中间保留真实视线空隙; 双叉前端略薄.
   for (const side of [-1, 1]) {
     box([.17, 2.62, .18], [side * .52, 1.43, 1.09], 0x3e5654, 2);
@@ -45,7 +57,9 @@ FPS.models.portForklift = (T, o = {}) => {
     for (let y = .63; y < 2.52; y += .13) box([.025, .065, .027], [side * .28, y, 1.2], 0x263b37, 1);
     box([.16, .63, .1], [side * .38, .58, 1.28], 0x617b71, 2);
     box([.16, .07, 1.36], [side * .38, .295, 1.91], 0x6a8176, 2);
-    box([.16, .035, .25], [side * .38, .2775, 2.715], 0xa5afa0, 2);
+    // 叉尖上表面连续变薄, 与主叉的顶/底接合, 避免短盒突然降低形成拼接断层.
+    const tip = new T.Shape(); tip.moveTo(0, .26); tip.lineTo(.25, .26); tip.lineTo(.25, .295); tip.lineTo(0, .33); tip.closePath();
+    add(new T.ExtrudeGeometry(tip, { depth: .16, bevelEnabled: false }).rotateY(-Math.PI / 2).translate(side * .38 + .08, 0, 2.59), 0xa5afa0, 2);
   }
   box([1.26, .16, .22], [0, 2.79, 1.09], 0x3e5654, 2);
   box([1.22, .2, .14], [0, .88, 1.26], 0x607a70, 2);
@@ -63,5 +77,5 @@ FPS.models.portForklift = (T, o = {}) => {
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .52, metalness: .58 }), new T.MeshStandardMaterial({ vertexColors: true, roughness: .31, metalness: .25 })];
   for (const i of [0, 2]) { materials[i].map = materials[i].bumpMap = materials[i].roughnessMap = grain; materials[i].bumpScale = .0015; }
   parts.forEach((p, i) => { const mesh = new T.Mesh(T.mergeGeometries(p), materials[i]); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); p.forEach(g => g.dispose()); });
-  return { root, dispose() { grain.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true; grain.dispose(); } };
 };

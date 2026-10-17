@@ -2,6 +2,16 @@
 FPS.models.coastalSky = (T, options = {}) => {
   const root = new T.Group();
   const steps = Math.max(24, Math.min(80, Math.round(options.steps || 48)));
+  // 同一组云体同时定义密度和保守射线范围; 平移共用时间坐标, 不改变云形或步进间隔.
+  const clouds = [
+    [[1.9,.67,-2.85],[1.45,.43,.72]], [[2.05,1.08,-2.95],[.93,.75,.63]],
+    [[2.18,1.65,-3.04],[.62,.6,.55]], [[1.56,1.25,-2.72],[.5,.44,.55]],
+    [[2.69,1.03,-2.9],[.71,.57,.6]], [[-1.65,.65,-2.65],[.95,.32,.62]],
+    [[-2.03,.88,-2.8],[.37,.4,.45]], [[-.15,.41,-4.9],[2.9,.19,.62]],
+    [[-.25,.83,-2.65],[.95,.3,.65]], [[.15,1.,2.6],[1.2,.36,.85]],
+    [[3.2,.8,1.9],[1.15,.56,1.2]], [[-2.7,.72,2.2],[.93,.47,.9]]
+  ];
+  const vector = a => 'vec3(' + a.join(',') + ')';
   const material = new T.ShaderMaterial({
     side: T.BackSide, depthWrite: false,
     uniforms: { uTime: { value: 0 }, uSun: { value: new T.Vector3(...(options.sun ?? [-32, 48, -21])).normalize() } },
@@ -32,24 +42,22 @@ FPS.models.coastalSky = (T, options = {}) => {
         f+=.13*noise(p); p=p*2.01+13.1;
         return f+.06*noise(p);
       }
-      float ellipsoid(vec3 p,vec3 c,vec3 r) { return 1.-length((p-c)/r); }
+      float ellipsoidSquared(vec3 p,vec3 c,vec3 r) { vec3 q=(p-c)/r; return dot(q,q); }
+      void cloudInterval(vec3 origin,vec3 direction,vec3 center,vec3 radius,vec2 limits,inout vec2 span){
+        vec3 p=(origin-center)/radius,d=direction/radius;
+        float a=dot(d,d),b=dot(p,d),c=dot(p,p)-1.221*1.221,discriminant=b*b-a*c;
+        if(discriminant<0.) return;
+        float h=sqrt(discriminant),lo=(-b-h)/a,hi=(-b+h)/a;
+        if(hi<limits.x||lo>limits.y) return;
+        span=vec2(min(span.x,max(lo,limits.x)),max(span.y,min(hi,limits.y)));
+      }
       float density(vec3 world) {
         // 沿 +X 以约 1.6 米/秒平移云场, 沿用现有步进与光照计算.
         vec3 p=world*.0025; p.x-=uTime*.004;
-        // 右侧高耸积云有宽阔云底和不对称云塔, 左侧云带留出蓝天.
-        float shape=ellipsoid(p,vec3(1.9,.67,-2.85),vec3(1.45,.43,.72));
-        shape=max(shape,ellipsoid(p,vec3(2.05,1.08,-2.95),vec3(.93,.75,.63)));
-        shape=max(shape,ellipsoid(p,vec3(2.18,1.65,-3.04),vec3(.62,.6,.55)));
-        shape=max(shape,ellipsoid(p,vec3(1.56,1.25,-2.72),vec3(.5,.44,.55)));
-        shape=max(shape,ellipsoid(p,vec3(2.69,1.03,-2.9),vec3(.71,.57,.6)));
-        shape=max(shape,ellipsoid(p,vec3(-1.65,.65,-2.65),vec3(.95,.32,.62)));
-        shape=max(shape,ellipsoid(p,vec3(-2.03,.88,-2.8),vec3(.37,.4,.45)));
-        shape=max(shape,ellipsoid(p,vec3(-.15,.41,-4.9),vec3(2.9,.19,.62)));
-        // 补足海面正前方和住宅上空的云团, 沿用同一次步进, 不叠加第二层天空.
-        shape=max(shape,ellipsoid(p,vec3(-.25,.83,-2.65),vec3(.95,.3,.65)));
-        shape=max(shape,ellipsoid(p,vec3(.15,1.,2.6),vec3(1.2,.36,.85)));
-        shape=max(shape,ellipsoid(p,vec3(3.2,.8,1.9),vec3(1.15,.56,1.2)));
-        shape=max(shape,ellipsoid(p,vec3(-2.7,.72,2.2),vec3(.93,.47,.9)));
+        // max(1-length) 等价于 1-sqrt(min(dot)), 每次密度查询只需求一次平方根.
+        float squared=1.e20;
+        ${clouds.map(([c,r]) => `squared=min(squared,ellipsoidSquared(p,${vector(c)},${vector(r)}));`).join('\n        ')}
+        float shape=1.-sqrt(squared);
         if(shape<-.22) return 0.;
         float billows=fbm(p*5.2);
         float d=shape+(billows-.5)*.64;
@@ -66,10 +74,15 @@ FPS.models.coastalSky = (T, options = {}) => {
           float nearT=max(0.,(118.-cameraPosition.y)/ray.y);
           float farT=min(4200.,(950.-cameraPosition.y)/ray.y);
           float stepSize=max(0.,farT-nearT)/float(${steps});
+          // 只跳过密度必为零的前后空段, 所有原始采样位置和云内光照探针保持不变.
+          vec3 origin=cameraPosition*.0025;origin.x-=uTime*.004;
+          vec2 span=vec2(farT,nearT),limits=vec2(nearT,farT);
+          ${clouds.map(([c,r]) => `cloudInterval(origin,ray*.0025,${vector(c)},${vector(r)},limits,span);`).join('\n          ')}
           float t=nearT+stepSize*.45, transmittance=1.;
           vec3 scattering=vec3(0.);
           for(int i=0;i<${steps};i++) {
-            if(transmittance<.012 || t>farT) break;
+            if(transmittance<.012 || t>farT || t>span.y) break;
+            if(t<span.x){t+=stepSize;continue;}
             vec3 p=cameraPosition+ray*t;
             float d=density(p);
             if(d>.005) {
@@ -112,6 +125,7 @@ FPS.models.coastalSky = (T, options = {}) => {
   let owner, previous, previousIntensity;
   return {
     root, update(dt) { material.uniforms.uTime.value += dt; },
+    prepare(renderer, scene) { this.beforeRender(renderer, scene); },
     beforeRender(renderer, scene) {
       if(owner || !root.visible) return;
       owner=scene;previous=scene.environment;previousIntensity=scene.environmentIntensity;

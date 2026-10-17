@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { ShaderLib } from 'three';
 const read=file=>readFileSync(new URL('../'+file,import.meta.url),'utf8');
-const document={createElement(){const ctx={createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),getImageData:(x,y,w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(){},createLinearGradient:()=>({addColorStop(){}})};
-  for(const n of ['save','restore','beginPath','moveTo','lineTo','bezierCurveTo','quadraticCurveTo','clip','fillRect','stroke'])ctx[n]=()=>{};
+const document={createElement(){const ctx={createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),getImageData:(x,y,w,h)=>({data:new Uint8ClampedArray(w*h*4)}),putImageData(){},createLinearGradient:()=>({addColorStop(){}}),createRadialGradient:()=>({addColorStop(){}})};
+  for(const n of ['save','restore','setTransform','beginPath','moveTo','lineTo','bezierCurveTo','quadraticCurveTo','clip','fillRect','strokeRect','rect','arc','closePath','fill','fillText','stroke'])ctx[n]=()=>{};
   return {width:1,height:1,getContext:()=>ctx};}};
 const c=vm.createContext({FPS:{models:{}},window:{},document,AbortController});vm.runInContext(read('vendor/three.min.js'),c);vm.runInContext(read('scene-kamakura.js'),c);
 const T=c.THREE,layout=c.window.FPS_LAYOUT;
@@ -80,6 +80,38 @@ for(const fail of [false,true]) {
 }
 console.log('PASS 独立接入/地形与顶视 UV/单通道 mipmap/稳定帧零绘制零遍历/补丁顺序/复用/释放/失败回退/硬件降级');
 
+// 中央顶面与码头接入口共用静态可见性图, 挡土墙保留深度比较, 角色仍独立投影.
+vm.runInContext(read('models/surface-shadows.js'),c);
+const hubConfig=layout.instances.find(i=>i.id==='hub-ground-shadow-cache').options;
+assert.throws(()=>factory(T,{minUp:1.1}),/朝上阈值无效/);
+assert.deepEqual(Array.from(hubConfig.receivers),['central-ground','port-ground']);
+const actual=hubConfig.receivers.concat(hubConfig.followers).map(id=>{
+ const data=layout.instances.find(i=>i.id===id);vm.runInContext(read(layout.catalog[data.model]),c);
+ const model=c.FPS.models[data.model](T,data.options);model.root.name=id;model.root.position.set(...data.position);return model;
+});
+for(const reverse of [false,true]) {
+ const f=fixture(),cache=factory(T,hubConfig),surfaces=c.FPS.models.surfaceShadows(T,layout.instances.find(i=>i.model==='surfaceShadows').options),actors=c.FPS.models.characterShadows(T);
+ f.sun.shadow.map=new T.WebGLRenderTarget(1,1);f.scene.add(...actual.map(m=>m.root));
+ const patches=[()=>cache.prepare(f.renderer,f.scene),()=>surfaces.beforeRender(f.renderer,f.scene),()=>actors.beforeRender(f.renderer,f.scene,f.view)];
+ for(const prepare of reverse?patches.reverse():patches)prepare();
+ const call=f.renderer.calls.find(c=>c.target.texture.format===T.RedFormat);assert(call);assert.equal(call.target.width,2048);assert.equal(call.target.height,1601);assert.equal(call.scene.children.length,2);
+ for(const model of actual)for(const mesh of model.root.children){
+  const shader=compile(mesh.material),retaining=mesh.name==='hub-ground-retaining';
+  assert.equal(!!shader.uniforms.groundShadowEnabled,!retaining,'中央顶面/挡土墙的阴影补丁分工冲突');
+  assert.equal(!!shader.uniforms.surfaceShadowReady,retaining,'地面仍叠加实时深度过滤');
+  assert(shader.fragmentShader.includes('directLight.color *= characterShadow()'),'地表缓存抹去了动态人物阴影');
+  assert.equal((shader.fragmentShader.match(/float getShadow\(/g)??[]).length,1,'阴影函数重复定义');
+  if(!retaining){assert.equal(shader.uniforms.groundShadowMinUp.value,model.root.name==='central-grass'?-1:.5);assert(shader.fragmentShader.includes('return uncachedGroundShadow('));}
+ }
+ assert(call.scene.children.every(mesh=>!mesh.isInstancedMesh),'风动草叶误写入静态地表缓存');
+ const snapshot=actual.map(m=>m.root.traverse);for(const m of actual)m.root.traverse=()=>{throw Error('中央稳定帧重复扫描');};
+ for(let i=0;i<2000;i++)for(const prepare of patches)prepare();assert.equal(f.renderer.calls.filter(c=>c.target.texture.format===T.RedFormat).length,1,'中央移动/稳定帧重复烘焙');
+ actual.forEach((m,i)=>m.root.traverse=snapshot[i]);
+ cache.dispose();surfaces.dispose();actors.dispose();f.sun.shadow.map.dispose();
+}
+for(const model of actual){model.dispose?.();model.root.traverse(n=>{if(n.isMesh){n.geometry.dispose();n.material.dispose();}});}
+console.log('PASS 真实中央/码头接入口接收网格, 挡土墙隔离/岸壁朝上阈值/风动草/动态人物兼容, 2000 帧不重复烘焙');
+
 // 同一斜面的相邻阴影像素不能直接共用中心深度; 验证逐样本平面修正消除自遮蔽.
 const matrixForPlane=fixture().sun.shadow.matrix;let acne=0;
 for(const [ax,az] of [[0,0],[.3,-.2],[-.3,.2]]) {
@@ -97,10 +129,13 @@ assert(acne>20);console.log('PASS 三种接收坡面逐样本深度修正, 保�
 const treeConfig=layout.instances.find(n=>n.id==='park-tree-23'),tree=c.FPS.models.parkTree(T,treeConfig.options);
 tree.root.position.set(...treeConfig.position);tree.root.rotation.set(...treeConfig.rotation);tree.root.scale.set(...treeConfig.scale);tree.root.updateMatrixWorld(true);
 const sun=fixture().sun,N=4096,matrix=sun.shadow.matrix,triangles=[];
-for(const mesh of tree.root.children.filter(n=>n.castShadow)) {
+vm.runInContext(read('models/port-service.js'),c);
+const lampConfig=layout.instances.find(i=>i.model==='portService'),lamp=c.FPS.models.portService(T,{lights:[lampConfig.options.lights[1]],booths:[],barriers:[],cabinets:[],rings:[],ladders:[]});
+lamp.root.position.set(...lampConfig.position);lamp.root.updateMatrixWorld(true);
+for(const mesh of [...tree.root.children,...lamp.root.children].filter(n=>n.castShadow)) {
   const g=mesh.geometry,p=g.attributes.position,uv=g.attributes.uv,index=g.index;
-  for(let i=0;i<index.count;i+=3)triangles.push({map:mesh.material.map?.isDataTexture?mesh.material.map:null,points:[0,1,2].map(j=>{
-    const k=index.getX(i+j),v=new T.Vector3().fromBufferAttribute(p,k).applyMatrix4(mesh.matrixWorld).applyMatrix4(matrix);
+  for(let i=0;i<(index?.count??p.count);i+=3)triangles.push({map:mesh.material.map?.isDataTexture?mesh.material.map:null,points:[0,1,2].map(j=>{
+    const k=index?index.getX(i+j):i+j,v=new T.Vector3().fromBufferAttribute(p,k).applyMatrix4(mesh.matrixWorld).applyMatrix4(matrix);
     return {x:v.x*N,y:v.y*N,z:v.z,u:uv.getX(k),v:uv.getY(k)};
   })});
 }
@@ -120,8 +155,8 @@ for(const {points:[a,b,d],map} of triangles) {
     const i=(y-sy)*sw+x-sx;depths[i]=Math.min(depths[i],a.z*w+b.z*u+d.z*v);
   }
 }
-function visibility(x,z) {
-  const q=new T.Vector3(x,2.424+sun.shadow.normalBias,z).applyMatrix4(matrix),px=q.x*N,py=q.y*N;
+function visibility(x,z,floor=2.424) {
+  const q=new T.Vector3(x,floor+sun.shadow.normalBias,z).applyMatrix4(matrix),px=q.x*N,py=q.y*N;
   const bx=Math.floor(px+.5)-2,by=Math.floor(py+.5)-2,fx=px+.5-Math.floor(px+.5),fy=py+.5-Math.floor(py+.5);
   const wx=[1-fx,1,1,fx],wy=[1-fy,1,1,fy];let sum=0;
   for(let j=0;j<4;j++)for(let i=0;i<4;i++) {
@@ -152,3 +187,22 @@ for(const distance of [50,40,30,20,12])for(let z=85;z<99;z+=.37)for(let x=-8;x<2
 assert(samples>300);assert(newError<oldError*.55,'远近重建误差未显著下降 '+JSON.stringify({oldError,newError,samples}));
 console.log('PASS 真实入口树软件投影/1080p 地表像素面积比较 '+JSON.stringify({samples,pointMeanError:oldError/samples,filteredMeanError:newError/samples,reduction:1-newError/oldError}));
 tree.dispose();
+
+// 同一静态太阳下, 实际 12 米港口灯杆的细投影也必须按地表像素面积过滤.
+const cell=(hubConfig.bounds[2]-hubConfig.bounds[0])/hubConfig.resolution,originX=78,originZ=52,shadowLevels=[{n:256,data:new Float32Array(256*256)}];
+for(let y=0;y<256;y++)for(let x=0;x<256;x++)shadowLevels[0].data[y*256+x]=visibility(originX+(x+.5)*cell,originZ+(y+.5)*cell,2.4);
+assert(visibility(80.2,54.15,2.4)<.25,'缓存掩盖了灯脚真实接触影');
+for(let n=128;n>=1;n/=2){const previous=shadowLevels.at(-1),data=new Float32Array(n*n);for(let y=0;y<n;y++)for(let x=0;x<n;x++)data[y*n+x]=[0,1].flatMap(j=>[0,1].map(i=>previous.data[(y*2+j)*previous.n+x*2+i])).reduce((a,b)=>a+b)/4;shadowLevels.push({n,data});}
+function lampLevel(l,x,z){const {n,data}=shadowLevels[l],px=(x-originX)/(cell*2**l)-.5,py=(z-originZ)/(cell*2**l)-.5,a=Math.floor(px),b=Math.floor(py),u=px-a,v=py-b,p=(i,j)=>data[clamp(j,n)*n+clamp(i,n)];return (p(a,b)*(1-u)+p(a+1,b)*u)*(1-v)+(p(a,b+1)*(1-u)+p(a+1,b+1)*u)*v;}
+function lampMip(x,z,l){l=Math.max(0,Math.min(shadowLevels.length-1,l));const a=Math.floor(l),f=l-a;return lampLevel(a,x,z)*(1-f)+lampLevel(Math.min(a+1,shadowLevels.length-1),x,z)*f;}
+let lampOld=0,lampNew=0,lampSamples=0;
+for(const distance of [20,35,50,65])for(let z=58;z<67;z+=.24)for(let x=84;x<97;x+=.19){
+ const focal=1080/(2*Math.tan(64*Math.PI/360)),dx=distance/focal,dz=distance*distance/(focal*1.7);let expected=0;
+ for(let j=0;j<36;j++)for(let i=0;i<4;i++)expected+=visibility(x+(i/4+.125-.5)*dx,z+(j/36+1/72-.5)*dz,2.4)/144;
+ if(expected>.995||expected<.005)continue;
+ let filtered=0;for(let j=0;j<8;j++)filtered+=lampMip(x,z+(j/8+1/16-.5)*dz,Math.log2(Math.max(dx,dz/8)/cell))/8;
+ lampOld+=Math.abs(visibility(x,z,2.4)-expected);lampNew+=Math.abs(filtered-expected);lampSamples++;
+}
+assert(lampSamples>100);assert(lampNew<lampOld*.55,'远处灯杆细影没有按像素覆盖稳定过滤 '+JSON.stringify({lampOld,lampNew,lampSamples}));
+console.log('PASS 真实高杆灯软件投影/20~65 米接近采样与 144 子样本均值比较 '+JSON.stringify({samples:lampSamples,pointMeanError:lampOld/lampSamples,filteredMeanError:lampNew/lampSamples,reduction:1-lampNew/lampOld}));
+lamp.dispose();

@@ -36,10 +36,21 @@ FPS.models.cargoShip = (T, o = {}) => {
   const colors = [0x3e7a80, 0xa95e4b, 0x859a78, 0xbbab68, 0x49626e];
   for (let bay = 0; bay < 4; bay++) for (let row = 0; row < 4; row++) for (let layer = 0; layer < (bay === 3 ? 1 : 2); layer++) {
     const x = -12 + bay * 12.3, z = (row - 1.5) * 2.65, y = 5.08 + layer * 2.85;
-    box([11.9, 2.8, 2.55], [x, y + 1.4, z], colors[(bay + row * 2 + layer) % colors.length]);
+    // 长侧面由连续波纹接管, 盒体只保留四个封面, 不在完整墙上堆重复凸条.
+    const body=new T.BoxGeometry(11.9,2.8,2.55);body.setIndex(Array.from(body.index.array).slice(0,24));
+    add(body.translate(x,y+1.4,z),colors[(bay+row*2+layer)%colors.length]);
     for (const side of [-1, 1]) {
       for (const lift of [.06, 2.74]) box([11.92, .09, .09], [x, y + lift, z + side * 1.24], 0x8c9c8e, 1);
-      for (let u = -5.6; u < 5.8; u += .42) box([.04, 2.6, .03], [x + u, y + 1.4, z + side * 1.285], colors[(bay + row * 2 + layer) % colors.length]);
+      const positions=[],count=Math.ceil(11.9/.42)*2;
+      function tri(a,b,c,normal){const n=new T.Vector3(...b).sub(new T.Vector3(...a)).cross(new T.Vector3(...c).sub(new T.Vector3(...a)));if(n.lengthSq()<1e-15)return;if(n.dot(new T.Vector3(...normal))<0)[b,c]=[c,b];positions.push(...a,...b,...c);}
+      for(let j=0;j<count;j++){
+        const x0=x-5.95+11.9*j/count,x1=x-5.95+11.9*(j+1)/count,z0=z+side*(1.275+(j%2)*.025),z1=z+side*(1.275+((j+1)%2)*.025),base=z+side*1.275;
+        const a=[x0,y,z0],b=[x1,y,z1],c=[x0,y+2.8,z0],d=[x1,y+2.8,z1];
+        tri(a,b,c,[0,0,side]);tri(b,d,c,[0,0,side]);
+        tri(c,d,[x0,y+2.8,base],[0,1,0]);tri(d,[x1,y+2.8,base],[x0,y+2.8,base],[0,1,0]);
+        tri(a,[x0,y,base],b,[0,-1,0]);tri(b,[x0,y,base],[x1,y,base],[0,-1,0]);
+      }
+      const panel=new T.BufferGeometry();panel.setAttribute('position',new T.Float32BufferAttribute(positions,3));panel.setAttribute('uv',new T.Float32BufferAttribute(new Float32Array(positions.length/3*2),2));panel.computeVertexNormals();add(panel,colors[(bay+row*2+layer)%colors.length]);
     }
   }
   const stern = -l / 2 + 10;
@@ -59,5 +70,5 @@ FPS.models.cargoShip = (T, o = {}) => {
   const mats = [new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .002, vertexColors: true, roughness: .76, metalness: .15 }),
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .63, metalness: .35 }), new T.MeshStandardMaterial({ vertexColors: true, roughness: .17, metalness: .48 })];
   parts.forEach((batch, i) => { const mesh = new T.Mesh(T.mergeGeometries(batch), mats[i]); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); batch.forEach(g => g.dispose()); });
-  return { root, dispose() { map.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true; map.dispose(); } };
 };

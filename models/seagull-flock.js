@@ -21,11 +21,21 @@ FPS.models.seagullFlock = T => {
   for (let i = 0; i < points.length; i += 3) { const c = new T.Color(points[i] > .6 ? 0x354144 : 0xdce4e2); colors.push(c.r, c.g, c.b); }
   wing.setAttribute('color', new T.Float32BufferAttribute(colors, 3)); wing.computeVertexNormals();
   const wings = new T.InstancedMesh(wing, material, count * 2);
-  // 包围体随航线变化, 两个小批次关闭裁剪, 避免旧包围体使飞鸟突然消失.
-  bodies.frustumCulled = wings.frustumCulled = false; root.add(bodies, wings);
+  // 包围体覆盖完整航线和振翅幅度; 镜头背后的海鸥可安全裁剪, 不逐帧重建包围体.
+  const flightBounds = new T.Box3();
+  for (let i = 0; i < count; i++) {
+    const group = Math.floor(i / 9), rank = i % 9, spread = Math.ceil(rank / 2) * (rank % 2 ? 1 : -1), r = 34 + spread * 1.05, z = 15 + spread * .5;
+    flightBounds.expandByPoint(new T.Vector3(-r - group * 18, 17 + group * 8 - .65, -22 - group * 22 - z));
+    flightBounds.expandByPoint(new T.Vector3(r - group * 18, 17 + group * 8 + .65, -22 - group * 22 + z));
+  }
+  flightBounds.expandByScalar(1); bodies.geometry.computeBoundingSphere();
+  for (const mesh of [bodies, wings]) {
+    mesh.boundingBox = flightBounds.clone(); mesh.boundingSphere = flightBounds.getBoundingSphere(bodies.geometry.boundingSphere.clone());
+    mesh.raycast = () => {}; root.add(mesh);
+  }
   const bird = new T.Object3D(), joint = new T.Object3D(); bird.add(joint); let time = 0;
   function update(dt) {
-    time += dt;
+    if (!Number.isFinite(dt) || dt < 0) return; time += dt;
     for (let i = 0; i < count; i++) {
       const group = Math.floor(i / 9), rank = i % 9, a = time * (.055 + group * .012) + group * 2.6 - rank * .025;
       const spread = Math.ceil(rank / 2) * (rank % 2 ? 1 : -1), radius = 34 + spread * 1.05;
@@ -39,5 +49,7 @@ FPS.models.seagullFlock = T => {
     }
     bodies.instanceMatrix.needsUpdate = wings.instanceMatrix.needsUpdate = true;
   }
-  update(0); return { root, update };
+  update(0); let disposed = false; return { root, update, dispose() {
+    if (disposed) return; disposed = true; bodies.dispose(); wings.dispose();
+  } };
 };

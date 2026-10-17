@@ -75,7 +75,7 @@ FPS.models.sakuraTree = (() => {
     for(let i=0;i<fp.count;i++) fp.setZ(i,.012*(1.-Math.abs(fp.getX(i))/.16)); flower.computeVertexNormals();
     const foliageMaterial = new T.MeshStandardMaterial({ map, alphaTest: .42, alphaToCoverage: true, side: T.DoubleSide, roughness: .92 });
     const wind = { value: 0 }, coverage = { value: 1 };
-    foliageMaterial.customProgramCacheKey = () => 'sakura-petals-v3';
+    foliageMaterial.customProgramCacheKey = () => 'sakura-petals-v5';
     foliageMaterial.onBeforeCompile = shader => {
       shader.uniforms.leafTime = wind; shader.uniforms.leafCoverage = coverage;
       shader.vertexShader = 'uniform float leafTime; varying vec3 canopyNormal;\n' + shader.vertexShader.replace('#include <begin_vertex>', `
@@ -87,11 +87,18 @@ FPS.models.sakuraTree = (() => {
           transformed.x+=sin(leafTime*.8+phase*1.3)*.018;
         #endif
       `);
-      shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `#ifdef USE_ALPHATEST
+      shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `
+      // 先求导再透明裁切, 保留边缘片元的稳定采样范围.
+      float leafFootprint=max(length(dFdx(vMapUv)),length(dFdy(vMapUv)));
+      #ifdef USE_ALPHATEST
         #ifdef ALPHA_TO_COVERAGE
           if(leafCoverage>.5) {
             float width=max(fwidth(diffuseColor.a),.001);
-            diffuseColor.a=smoothstep(alphaTest-.5*width,alphaTest+.5*width,diffuseColor.a);
+            float covered=smoothstep(alphaTest-.5*width,alphaTest+.5*width,diffuseColor.a);
+            // 亚像素叶面使用 mipmap 的平均覆盖率, 不因固定阈值成片开关.
+            vec2 leafTexels=vec2(textureSize(map,0));
+            float leafPixels=max(length(dFdx(vMapUv)*leafTexels),length(dFdy(vMapUv)*leafTexels));
+            diffuseColor.a=mix(covered,diffuseColor.a,smoothstep(1.,3.,leafPixels));
             if(diffuseColor.a==0.) discard;
           } else {
             if(diffuseColor.a<alphaTest) discard;
@@ -103,8 +110,9 @@ FPS.models.sakuraTree = (() => {
       #endif`);
       // 近景保持花瓣曲面, 花簇小于数像素时平滑光照, 避免细小正反面不断跳亮.
       shader.fragmentShader = 'uniform float leafCoverage; varying vec3 canopyNormal;\n'+shader.fragmentShader.replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
-        float leafFootprint=max(length(dFdx(vMapUv)),length(dFdy(vMapUv)));
-        normal=normalize(mix(normal,normalize(canopyNormal),.95*smoothstep(.1,.4,leafFootprint)));`).replace('#include <lights_fragment_begin>', `
+        vec3 leafNormal=normal*faceDirection, canopyDirection=normalize(canopyNormal);
+        leafNormal*=dot(leafNormal,canopyDirection)<-.0001?-1.:1.;
+        normal=normalize(mix(leafNormal,canopyDirection,.95*smoothstep(.1,.4,leafFootprint)));`).replace('#include <lights_fragment_begin>', `
         #include <lights_fragment_begin>
         #if NUM_DIR_LIGHTS > 0
           float transmission=pow(max(dot(geometryViewDir,-directionalLights[0].direction),0.),3.);

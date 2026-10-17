@@ -10,7 +10,7 @@ FPS.models.sunRays = (T, o = {}) => {
   const samples = Math.max(16, Math.min(48, Math.round(o.samples ?? 32)));
   const radius = Math.max(.1, Math.min(1.2, o.aoRadius ?? .85)), distance = Math.max(5, Math.min(80, o.aoDistance ?? 40));
   const strength = Math.max(0, Math.min(.6, o.aoStrength ?? .42));
-  let initialized = false, disposed = false;
+  let initialized = false, targetsReady = false, disposed = false;
   function supported(renderer) { return !disposed && root.visible && renderer.extensions.has('EXT_color_buffer_float'); }
   function initialize(renderer) {
     if (initialized) return;
@@ -19,6 +19,21 @@ FPS.models.sunRays = (T, o = {}) => {
     const counts = [gl.RGBA16F, gl.DEPTH_COMPONENT24].map(format => Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER, format, gl.SAMPLES) ?? []));
     world.samples = [4, 2].find(n => n <= renderer.capabilities.maxSamples && counts.every(c => c.includes(n))) ?? 0;
     initialized = true;
+  }
+  function resize(renderer) {
+    renderer.getDrawingBufferSize(size);
+    if (targetsReady && world.width === size.x && world.height === size.y) return false;
+    world.setSize(size.x, size.y);
+    const scale = Math.min(.25, 512 / size.x);
+    shafts.setSize(Math.max(1, Math.round(size.x * scale)), Math.max(1, Math.round(size.y * scale)));
+    occlusion.setSize(Math.max(1, Math.round(size.x / 2)), Math.max(1, Math.round(size.y / 2)));
+    ao.uniforms.uDepthSize.value.copy(size);
+    composite.uniforms.uAOSize.value.set(1 / occlusion.width, 1 / occlusion.height);
+    composite.uniforms.uTexel.value.set(1 / shafts.width, 1 / shafts.height);
+    // 光束当前不可见时也分配最终尺寸, 不把首次缓冲创建留到玩家抬头迎光的一帧.
+    for (const buffer of [world, occlusion, shafts]) renderer.initRenderTarget(buffer);
+    targetsReady = true;
+    return true;
   }
   const rays = new T.ShaderMaterial({
     depthTest: false, depthWrite: false, toneMapped: false, vertexShader,
@@ -154,36 +169,29 @@ FPS.models.sunRays = (T, o = {}) => {
       initialize(renderer);
       const target = renderer.getRenderTarget();
       try {
+        if (!resize(renderer)) for (const buffer of [world, occlusion, shafts]) renderer.initRenderTarget(buffer);
         for (const [material, destination] of [[ao, occlusion], [rays, shafts], [composite, target]]) {
           quad.material = material; renderer.setRenderTarget(destination);
-          await renderer.compileAsync(post, camera); renderer.render(post, camera);
+          // 只编译; 首次世界绘制后才采样其深度, 由统一准备流程在入场前完成实际输出.
+          await renderer.compileAsync(post, camera);
         }
       } finally { renderer.setRenderTarget(target); }
     },
     render(renderer, scene, view) {
       view.getWorldDirection(facing);
       if (!supported(renderer)) return renderer.render(scene, view);
-      initialize(renderer);
-      point.copy(view.position).addScaledVector(sun, 1000).project(view);
-      const edge = Math.max(Math.abs(point.x), Math.abs(point.y)), fade = sun.dot(facing) > 0 ? Math.max(0, Math.min(1, (1.2 - edge) / .45)) : 0;
-      renderer.getDrawingBufferSize(size);
-      if (world.width !== size.x || world.height !== size.y) {
-        world.setSize(size.x, size.y);
-        const scale = Math.min(.25, 512 / size.x);
-        shafts.setSize(Math.max(1, Math.round(size.x * scale)), Math.max(1, Math.round(size.y * scale)));
-        occlusion.setSize(Math.max(1, Math.round(size.x / 2)), Math.max(1, Math.round(size.y / 2)));
-        ao.uniforms.uDepthSize.value.copy(size);
-        composite.uniforms.uAOSize.value.set(1 / occlusion.width, 1 / occlusion.height);
-        composite.uniforms.uTexel.value.set(1 / shafts.width, 1 / shafts.height);
-      }
-      ao.uniforms.uInverse.value.copy(view.projectionMatrixInverse);
-      ao.uniforms.uProjection.value.copy(view.projectionMatrix);
-      composite.uniforms.uNearFar.value.set(view.near, view.far);
-      rays.uniforms.uSun.value.set(point.x * .5 + .5, point.y * .5 + .5);
-      rays.uniforms.uScale.value.set(2 / view.projectionMatrix.elements[0], 2 / view.projectionMatrix.elements[5]);
-      composite.uniforms.uStrength.value = (o.strength ?? .65) * fade * fade * (3 - 2 * fade);
       const target = renderer.getRenderTarget();
       try {
+        initialize(renderer);
+        point.copy(view.position).addScaledVector(sun, 1000).project(view);
+        const edge = Math.max(Math.abs(point.x), Math.abs(point.y)), fade = sun.dot(facing) > 0 ? Math.max(0, Math.min(1, (1.2 - edge) / .45)) : 0;
+        resize(renderer);
+        ao.uniforms.uInverse.value.copy(view.projectionMatrixInverse);
+        ao.uniforms.uProjection.value.copy(view.projectionMatrix);
+        composite.uniforms.uNearFar.value.set(view.near, view.far);
+        rays.uniforms.uSun.value.set(point.x * .5 + .5, point.y * .5 + .5);
+        rays.uniforms.uScale.value.set(2 / view.projectionMatrix.elements[0], 2 / view.projectionMatrix.elements[5]);
+        composite.uniforms.uStrength.value = (o.strength ?? .65) * fade * fade * (3 - 2 * fade);
         renderer.setRenderTarget(world); renderer.render(scene, view);
         quad.material = ao; renderer.setRenderTarget(occlusion); renderer.render(post, camera);
         if (fade) { quad.material = rays; renderer.setRenderTarget(shafts); renderer.render(post, camera); }

@@ -22,11 +22,18 @@ FPS.models.portTerminalTractor = (T, o = {}) => {
     box([.055, .33, .48], [side * 1.19, 1.53, .49], 0x536f6b, 2);
     box([.075, .05, .25], [side * 1.205, 1.8, .76], 0xc2c7b2, 2);
     box([.2, .38, .25], [side * 1.42, 2.61, 1.68], 0x344c4c, 1);
+    box([.3,.025,.025],[side*1.27,2.73,1.6],0x9cae9e,2);
+    box([.14,.27,.012],[side*1.42,2.61,1.547],0xaac3bb,3);
     box([.19, .04, .46], [side * 1.21, .65, .48], 0x99a898, 2);
     box([.3, .05, .47], [side * 1.18, 1.02, .48], 0x6d8277, 2);
   }
   for (const z of [-.064, 1.824]) box([2.02, .82, .055], [0, 2.585, z], 0x315660, 3);
   box([.06, .91, .075], [0, 2.585, 1.853], 0xb8c2ab, 2);
+  for(const x of [-.5,.5])box([.022,.63,.016],[x,2.52,1.868],0x314743,1,[0,0,-.45]);
+  for(const side of [-1,1]){
+    box([.2,.12,.025],[side*.8,.73,-2.025],0xa85542,3);
+    box([.08,.12,.025],[side*.94,.73,-2.025],0xc29e4c,3);
+  }
   box([2.39, .12, 2.04], [0, 3.19, .88], 0xc1c8af);
   for (const x of [-.8, .8]) cyl(.073, .14, [x, 3.31, .89], 0xe6ad44, 0);
   box([2.46, .24, .23], [0, .66, 2.21], 0x4a615c, 2);
@@ -67,5 +74,5 @@ FPS.models.portTerminalTractor = (T, o = {}) => {
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .54, metalness: .58 }), new T.MeshStandardMaterial({ vertexColors: true, roughness: .2, metalness: .4 }), new T.MeshStandardMaterial({ map, vertexColors: true, roughness: .73 })];
   for (const i of [0, 2]) { materials[i].map = materials[i].bumpMap = materials[i].roughnessMap = grain; materials[i].bumpScale = .0015; }
   parts.forEach((p, i) => { const mesh = new T.Mesh(T.mergeGeometries(p), materials[i]); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); p.forEach(g => g.dispose()); });
-  return { root, dispose() { map.dispose(); grain.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true; map.dispose(); grain.dispose(); } };
 };

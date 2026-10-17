@@ -7,7 +7,7 @@
   const box = (size, offset = [0, 0, 0]) => ({ size, offset });
   // 立面细节使用本地朝向和墙面原点, 将浅框/雨檐尺寸转换为同位置的 AABB.
   const facadeBox = (size, face, offset = [0, 0, 0]) => {
-    const c = Math.cos(face.yaw), s = Math.sin(face.yaw), p = face.position;
+    const c = Math.cos(face.yaw??0), s = Math.sin(face.yaw??0), p = face.position;
     return box([Math.abs(c) * size[0] + Math.abs(s) * size[2], size[1], Math.abs(s) * size[0] + Math.abs(c) * size[2]],
       [p[0] + offset[0] * c + offset[2] * s, p[1] + offset[1], p[2] - offset[0] * s + offset[2] * c]);
   };
@@ -30,14 +30,14 @@
       { id: 'northeast', name: '海望山与岩壁步道', center: [120, 116], status: 'developed' },
       { id: 'southeast', name: '集装箱货运码头', center: [120, 20], status: 'developed' }
     ],
-    center: { name: '中央广场', position: [60, 68], size: [20, 20], status: 'developed' }
+    center: { name: '海岸公共驿站', position: [60, 68], size: [20, 20], status: 'developed' }
   };
   // 公园东半部湖区挖去原台地, 岸线共用于模型和岸边碰撞, 水下保留真实池底.
   const pond = { x: 25, z: 123, width: 40, depth: 44, bottom: -.55, waterLevel: -.18, rim: .024 };
   const pondCut = [pond.x - pond.width / 2, pond.z - pond.depth / 2, pond.x + pond.width / 2, pond.z + pond.depth / 2];
   const shore = Array.from({ length: 40 }, (_, i) => { const a = i * Math.PI / 20; return [(pond.width / 2 - 2) * Math.cos(a) * (1 + .09 * Math.sin(a)), Math.round((pond.depth / 2 - 2) * Math.sin(a) * 10000) / 10000]; });
 
-  const parcels = [...[[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]), [60, 21, 20, 78], [60, 116, 20, 76], [0, 68, 100, 20], [120, 68, 100, 20]];
+  const parcels = [[-50, 78, pondCut[0], 154], [pondCut[2], 78, 50, 154], [pondCut[0], 78, pondCut[2], pondCut[1]], [pondCut[0], pondCut[3], pondCut[2], 154]].map(([x0, z0, x1, z1]) => [(x0 + x1) / 2, (z0 + z1) / 2, x1 - x0, z1 - z0]);
   const slabs = parcels.map(([x, z, w, d]) => box([w, height + .6, d], [x, (height - .6) / 2, z]));
   slabs.push(box([pond.width, height + .6 + pond.bottom, pond.depth], [pond.x, (height + pond.bottom - .6) / 2, pond.z]));
   // 外围用简单实心挡墙, 不复制砖块细节; 内部地块相接, 无叠面或额外台阶.
@@ -642,16 +642,265 @@
     cover:mountainCover.map(p=>({...p,position:mountainWorld(p.position)})),
     ladders:mountainClimbs.map(l=>({...l,bottom:mountainWorld(l.bottom),top:mountainWorld(l.top),exit:mountainWorld(l.exit)})),
     approaches:[['south-trail','south-summit'],['forest-trail','west-summit'],['coast-trail']]};
-  // 中央广场保留独立铺地与错位树池, 使用通用步道设施, 与山体模型分离.
-  const squareSlabs=[box([20,3,20],[0,.9,0])];
-  place('central-paving','terraceGround',[60,0,68],{bounds:[-10,-10,10,10],slabs:squareSlabs,surfaces:[{rect:[-10,-10,20,20],kind:'stone'}]},squareSlabs);
-  const square={planters:[{position:[-6,2.4,2],size:[3.4,.72,4]},{position:[5.8,2.4,-2.5],size:[3.4,.72,4]}],
-    shelters:[{position:[0,2.4,6],width:5.6,depth:3.2,height:3,kind:'pavilion'}],benches:[{position:[-6,2.4,-.7]},{position:[0,2.4,6]}],signs:[{position:[7.5,2.4,6.2],slot:1,width:2.2,height:2.5}]};
-  place('central-facilities','trailFacilities',[60,0,68],square,trailFurnitureSolids(square));
-  for(const[i,p]of square.planters.entries()) {
-    place('central-tree-'+i,'zelkovaTree',[60+p.position[0],2.96,68+p.position[2]],{seed:850+i},[box([.48,3,.48],[0,1.5,0])]);
-    place('central-shrub-'+i,'lowHedge',[60+p.position[0],2.96,68+p.position[2]],{width:2.95,depth:3.55,height:.6,dense:true,natural:true,seed:861+i});
+  // 中央枢纽连同四条连接带替换原地基. 低庭院真正挖空, 外观与实体共用矩形/高度规格.
+  const hubRoot=[60,0,68],hubPoint=([x,y,z])=>[x-60,y,z-68],hubRect=([a,b,c,d])=>[a-60,b-68,c-60,d-68];
+  const hubPlots=[[-50,58,50,78],[70,58,170,78],[50,-18,70,58],[50,78,70,154],
+    [50,58,52.5,78],[57.2,58,70,78],[52.5,58,57.2,59.5],[52.5,65.5,57.2,78]].map(rect=>({rect:hubRect(rect),top:height}));
+  hubPlots.push({rect:hubRect([52.5,59.5,57.2,65.5]),top:1.8},{rect:hubRect([64.5,56.6,67.4,61.6]),top:3.6,bottom:height});
+  const hubRamps=[{id:'court-ramp',rect:hubRect([55,62.3,57.2,65.5]),heights:[1.8,1.8,2.4,2.4],bottom:1.65},
+    {id:'terrace-ramp',rect:hubRect([64.8,50.2,67.2,56.6]),heights:[2.4,2.4,3.6,3.6],bottom:2.25}];
+  const hubSteps=[];
+  for(let i=0;i<2;i++)hubSteps.push(box([.4,.35,2.4],hubPoint([52.7+i*.4,2.2-i*.2-.175,61.7])));
+  for(let i=0;i<6;i++)hubSteps.push(box([.3,.4,3],hubPoint([62.85+i*.3,2.6+i*.2-.2,59.1])));
+  // 两条笔直主轴和正交侧路. 建筑/掩体沿边布置, 不以折线绕过旧设施.
+  const hubPaths=[
+    {id:'west-main',width:4.6,points:[[-49,68],[50,68]]},
+    {id:'east-main',width:4.6,points:[[70,68],[169,68]]},
+    {id:'north-main',width:4.6,points:[[60,78],[60,152]]},
+    {id:'south-main',width:4.6,points:[[60,-17],[60,58]]},
+    {id:'center-west-east',width:4.6,points:[[50,68],[70,68]]},
+    {id:'center-south-north',width:4.6,points:[[60,58],[60,78]]},
+    {id:'center-loop',width:2.2,points:[[51.2,49],[69,49],[69,78.1],[51.2,78.1],[51.2,49]]},
+    {id:'west-bypass',width:2.5,points:[[-47.5,68],[-47.5,74.6],[51.2,74.6]]},
+    {id:'east-bypass',width:2.6,points:[[69,61.7],[167.5,61.7],[167.5,68]]},
+    {id:'north-bypass',width:2.5,points:[[69,78.1],[66,78.1],[66,152],[60,152]]},
+    {id:'south-bypass',width:2.5,points:[[60,-15.3],[54,-15.3],[54,49],[51.2,49]]},
+    {id:'station-north-link',width:4,points:[[0,58],[0,68]]}, {id:'station-east-link',width:4,points:[[50,39],[60,39]]},
+    {id:'park-south-link',width:4,points:[[0,68],[0,78]]}, {id:'park-east-link',width:3,points:[[49.5,123],[60,123]]},
+    {id:'hill-west-link',width:3,points:[[60,116],[70,116]]}, {id:'hill-south-link',width:3.2,points:[[108,68],[108,78]]},
+    {id:'hill-coast-link',width:3,points:[[160,61.7],[160,78]]}, {id:'port-west-link',width:4,points:[[60,44],[70,44]]},
+    {id:'port-north-link',width:4,points:[[78,58],[78,68]]}, {id:'port-east-link',width:3,points:[[146,58],[146,61.7]]}
+  ];
+  // 大种植岛裁出共用步行图和活动铺地, 用连续林缘替代孤立的小花床.
+  const hubSoil=[[-49.7,58.3,49.7,77.7],[70.3,58.3,169.7,77.7],[50.3,-17.7,69.7,57.7],
+    [50.3,78.3,69.7,153.7],[62.8,73.2,69.7,77.7]].map(hubRect);
+  // 朝向目标属于场景布局, 让长椅面向公共通路/庭院, 不朝花池或边墙.
+  const hubBenches=[{position:[55,1.8,60.3],facing:[55,63]},
+    {position:[37.6,2.4,71.5],facing:[37.6,68]}, {position:[56.6,2.4,89.2],facing:[60,89.2]},
+    {position:[-23,2.4,71.1],width:5.7,facing:[-23,68]}, {position:[64.75,2.4,39],facing:[60,39]},
+    {position:[51.1,2.4,-1],facing:[54,-1]}, {position:[131.4,2.4,72.4],facing:[131.4,68]},
+    {position:[65.6,2.4,73],width:4.1,facing:[65.6,68]}, {position:[-33,2.4,64.4],width:5,facing:[-33,68]},
+    {position:[17,2.4,70.95],width:4.8,facing:[17,68]}, {position:[49.5,2.4,62.4],width:4.2,facing:[54,62.4]}
+  ].map(b=>({...b,yaw:Math.atan2(b.position[0]-b.facing[0],b.position[2]-b.facing[1]),
+    position:hubPoint(b.position),facing:[b.facing[0]-60,b.facing[1]-68]}));
+  const hubBikeRacks=[{position:hubPoint([51.4,2.4,10]),bike:true,yaw:-Math.PI/2},
+    {position:hubPoint([51.4,2.4,32]),bike:true,yaw:-Math.PI/2},
+    {position:hubPoint([51.4,2.4,-4.4]),yaw:-Math.PI/2},
+    {position:hubPoint([-26.5,2.4,61.4]),bike:true,yaw:Math.PI/2}
+  ].map(r=>({...r,bikeYaw:Math.PI/2,bikeOffset:[.27,-.015,0],size:[1.46,r.bike?1.12:.75,r.bike?1.9:1.04]}));
+  const hubBenchPads=hubBenches.flatMap(b=>{
+    const distance=Math.hypot(b.position[0]-b.facing[0],b.position[2]-b.facing[1]);
+    // 座椅脚垫与 1.4 米接近通道共用铺地/植被避让, 不留下草地隔断.
+    return [facadeBox([(b.width??1.9)+.5,.01,1.55],b,[0,0,-.4]),facadeBox([1.4,.01,distance],b,[0,0,-distance/2])]
+      .map(p=>[p.offset[0]-p.size[0]/2,p.offset[2]-p.size[2]/2,p.offset[0]+p.size[0]/2,p.offset[2]+p.size[2]/2]);
+  });
+  const hubPads=[[-38,59.5,-28,65], [12,70.6,22,77.3], [-27,70.8,-19,73.2], [34.5,70.5,41,73], [22,59,28,63],
+    [50.3,59.3,52.4,65.5], [52.5,70.7,57.6,77], [50.6,78.9,57.6,85.5], [50.4,76.9,57.6,79.3],
+    [50.4,-6,52.5,.3], [50.4,6,52.5,12.5], [50.4,28,52.5,34.5], [63.3,3,69.5,13], [63.3,25,69.5,35],
+    [50.5,87.5,57,96], [50.5,96.5,56,101], [63.5,135,65,141], [99,58.5,112.5,65.8],
+    [114.5,71.4,125.5,77.6], [140.5,71.4,150.5,77.6], [82,58.5,88,62.6], [140,59,153,62.4],
+    [64.8,50.2,67.2,56.6], [64.5,56.6,67.4,61.6],
+    [-28.2,60.2,-25.2,62.6], [62.3,37.6,65.1,40.4]].map(hubRect).concat(hubBenchPads);
+  const hubLocalPaths=hubPaths.map(path=>({...path,points:path.points.map(([x,z])=>[x-60,z-68])}));
+  const hubPathDistance=(x,z)=>Math.min(...hubLocalPaths.flatMap(path=>path.points.slice(1).map((b,i)=>{
+    const a=path.points[i],dx=b[0]-a[0],dz=b[1]-a[1],t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/(dx*dx+dz*dz)));
+    return Math.hypot(x-a[0]-dx*t,z-a[1]-dz*t)-path.width/2;
+  })));
+  const hubClearance=(x,z)=>Math.min(hubPathDistance(x,z),...hubPads.map(([a,b,c,d])=>{
+    const dx=Math.max(a-x,0,x-c),dz=Math.max(b-z,0,z-d);return dx||dz?Math.hypot(dx,dz):-Math.min(x-a,c-x,z-b,d-z);
+  }));
+  // 三片缓丘每片只使用一个高度场碰撞, 地面/植被/树根共用三角插值.
+  const hubLandforms=[[50.3,103,56.3,114,.55],[50.3,126,56.3,137,.42],[50.3,140,56.3,151,.68]].map(([a,b,c,d,rise])=>{
+    const rect=hubRect([a,b,c,d]),columns=Math.ceil((c-a)/.5)+1,rows=Math.ceil((d-b)/.5)+1,heights=[];
+    for(let j=0;j<rows;j++)for(let i=0;i<columns;i++) {
+      const x=rect[0]+i*(c-a)/(columns-1),z=rect[1]+j*(d-b)/(rows-1),u=(i/(columns-1)-.5)*2,v=(j/(rows-1)-.5)*2;
+      const edge=Math.max(0,1-u*u)*Math.max(0,1-v*v),clear=Math.max(0,Math.min(1,(hubClearance(x,z)-.5)/1.3));
+      heights.push(height+rise*edge*edge*clear*clear*(3-2*clear));
+    }
+    return {rect,columns,rows,heights,maxSlope:.8,bottom:height-.2};
+  });
+  const hubSurface=(x,z)=>{
+    const land=hubLandforms.find(l=>x>=l.rect[0]&&x<=l.rect[2]&&z>=l.rect[1]&&z<=l.rect[3]);if(!land)return height;
+    const {rect,columns,rows,heights}=land,u=(x-rect[0])/(rect[2]-rect[0])*(columns-1),v=(z-rect[1])/(rect[3]-rect[1])*(rows-1),i=Math.min(columns-2,Math.floor(u)),j=Math.min(rows-2,Math.floor(v)),a=u-i,b=v-j;
+    const h0=heights[j*columns+i],h1=heights[j*columns+i+1],h2=heights[(j+1)*columns+i],h3=heights[(j+1)*columns+i+1];
+    return a+b<=1?h0+(h1-h0)*a+(h2-h0)*b:h3+(h2-h3)*(1-a)+(h1-h3)*(1-b);
+  };
+  const hubTrees=[[-42,60],[-35,76.8],[-19,60.5],[10.8,76.8],[34,59.8],[43,76.8],
+    [52.3,102],[53.2,108],[52,129],[53.2,145],[65.7,75.5],
+    [68,-7],[68,19],[51.1,21],[51.1,44],[90,76.8],[-39.5,60.5],[-6.5,76.8],[68.7,107],[68.7,146.5]].map(([x,z])=>[x,hubSurface(x-60,z-68)-.035,z]);
+  const hubDrains=[[14,2.4,65.3],[46,2.4,61.8],[56,2.4,46],[68.8,2.4,72.5],[62.9,2.4,107],[113,2.4,61.4],[151,2.4,70.7],
+    [57.3,1.8,60.1]].map(position=>({position:hubPoint(position),width:1.1,depth:.36}));
+  const hubTurf={seed:1483,colors:{fresh:[99,124,65],dry:[135,139,83],shade:[70,100,53]},
+    woodland:hubTrees.map(([x,,z],i)=>({center:[x-60,z-68],radius:[2.55+i%3*.2,2.4+i%2*.35],seed:461+i*31})),
+    soilPatches:[[-30,68.8,1.8,1.1,.58],[42,73.3,1.7,1.3,.55],[67,120,1.5,2,.45],
+      [67,7,1.2,1.8,.5],[115,76,1.8,1.2,.56]].map(([x,z,rx,rz,strength])=>({center:[x-60,z-68],radius:[rx,rz],strength}))};
+  const hubGround={bounds:[-110,-86,110,86],turf:hubTurf,treeBases:hubTrees.map(([x,,z])=>[x-60,z-68]),plots:hubPlots,ramps:hubRamps,steps:hubSteps,soil:hubSoil,pads:hubPads,landforms:hubLandforms,
+    insets:hubDrains.map(({position:[x,,z],width:w,depth:d})=>[x-w/2,z-d/2,x+w/2,z+d/2]),
+    zones:[{rect:hubRect([-50,58,50,78]),colors:['#b0afa4','#a6aca3']},{rect:hubRect([50,78,70,154]),colors:['#adb0a4','#a2a99e']},
+      {rect:hubRect([50,-18,70,58]),colors:['#a5aca3','#adaea3']},{rect:hubRect([70,58,170,78]),colors:['#a9ada4','#a1aaa2']},
+      {rect:hubRect([52.5,59.5,57.2,65.5]),colors:['#b4b0a1','#adafa2']},{rect:hubRect([64.5,56.6,67.4,61.6]),colors:['#b0b1a4','#a8afa3']}],
+    paths:hubLocalPaths};
+  const hubFloorBoxes=hubPlots.map(({rect:[a,b,c,d],top,bottom=-.6})=>box([c-a,top-bottom,d-b],[(a+c)/2,(top+bottom)/2,(b+d)/2]));
+  const hubRampBoxes=hubRamps.map(({rect:[a,b,c,d],heights,bottom})=>({...box([c-a,Math.max(...heights)-bottom+.02,d-b],[(a+c)/2,(Math.max(...heights)+bottom)/2,(b+d)/2]),heightfield:{columns:2,rows:2,heights,maxSlope:.35}}));
+  const hubLandformBoxes=hubLandforms.map(l=>{const [a,b,c,d]=l.rect,top=Math.max(...l.heights);return {...box([c-a,top-l.bottom+.02,d-b],[(a+c)/2,(top+l.bottom)/2,(b+d)/2]),heightfield:{columns:l.columns,rows:l.rows,heights:l.heights,maxSlope:l.maxSlope}};});
+  place('central-ground','hubGround',hubRoot,hubGround,[...hubFloorBoxes,...hubRampBoxes,...hubLandformBoxes,...hubSteps]);
+
+  // 接待与展陈双翼. 两扇穿行门与开放连廊共用实体开口, 坡屋顶形成中央轮廓.
+  const visitorWidth=4.8,visitorDepth=5.6,visitorHeight=3.35,visitorPosition=[55,height,73.9];
+  const visitorDoors=[{axis:'z',side:-1,center:.2,width:1.8,height:2.5},{axis:'z',side:1,center:.2,width:1.8,height:2.5}];
+  const visitorWindows=[{axis:'z',side:-1,center:-1.65,width:.8,bottom:1,height:1.1},
+    {axis:'x',side:1,center:0,width:2.3,bottom:1,height:1.2},{axis:'x',side:-1,center:-.7,width:1.6,bottom:1,height:1.2}];
+  const visitorWalls=[];
+  const roomWalls=(w,d,h,center,holes)=>{
+    const list=[];
+    for(const axis of ['x','z'])for(const side of [-1,1]) {
+      const span=axis==='z'?w+.2:d-.2,depth=axis==='z'?d:w,openings=holes.filter(p=>p.axis===axis&&p.side===side);
+      const cuts=[...new Set([-span/2,span/2,...openings.flatMap(p=>[p.center-p.width/2,p.center+p.width/2])])].sort((a,b)=>a-b);
+      const wall=(a,b,low,high)=>{if(b-a<.0001||high-low<.0001)return;list.push(box(axis==='z'?[b-a,high-low,.2]:[.2,high-low,b-a],axis==='z'?[center[0]+(a+b)/2,(low+high)/2,center[1]+side*depth/2]:[center[0]+side*depth/2,(low+high)/2,center[1]+(a+b)/2]));};
+      for(let i=1;i<cuts.length;i++){const a=cuts[i-1],b=cuts[i],hole=openings.find(p=>(a+b)/2>p.center-p.width/2&&(a+b)/2<p.center+p.width/2);if(hole){wall(a,b,0,hole.bottom??0);wall(a,b,(hole.bottom??0)+hole.height,h);}else wall(a,b,0,h);}
+    }
+    return list;
+  };
+  visitorWalls.push(...roomWalls(visitorWidth,visitorDepth,visitorHeight,[0,0],[...visitorDoors,...visitorWindows]));
+  const wing={width:6.4,depth:5.6,height:3.1,center:[-.8,8.4]},wingDoors=[{axis:'z',side:-1,center:.6,width:1.8,height:2.5,origin:[-.2,0,5.6]}],
+    wingWindows=[{axis:'x',side:1,center:0,width:2.4,bottom:1,height:1.1,origin:[2.4,0,8.4]},
+      {axis:'x',side:-1,center:-.1,width:2.2,bottom:1.1,height:1.1,origin:[-4,0,8.3]},
+      {axis:'z',side:1,center:1.1,width:1.8,bottom:1.1,height:1.1,origin:[.3,0,11.2]}];
+  const visitorStructure=roomWalls(wing.width,wing.depth,wing.height,wing.center,[...wingDoors,...wingWindows]);
+  // 窗户保持封闭, 身体使用连续墙面; 只切真实通行门, 射击仍命中模型窗框/玻璃.
+  const visitorBodyWalls=[...roomWalls(visitorWidth,visitorDepth,visitorHeight,[0,0],visitorDoors),...roomWalls(wing.width,wing.depth,wing.height,wing.center,wingDoors)];
+  const visitorPosts=[],visitorInterior=[box([1.25,.92,.7],[-1.35,.5,.55]),box([1.4,1.8,.4],[-1.3,.9,2.3]),box([2.2,.75,.6],[-1.4,.415,9.7])];
+  const visitorFloors=[box([visitorWidth-.2,.12,visitorDepth-.2],[0,-.02,0]),box([wing.width-.2,.12,wing.depth-.2],[-.8,-.02,8.4])];
+  const visitorRoofs=[{width:5.2,depth:6.1,center:[0,0],top:3.52,pitch:.42,thickness:.16,gableWidth:visitorWidth,gableDepth:visitorDepth,wallHeight:visitorHeight},
+    {width:6.8,depth:6.1,center:wing.center,top:3.27,pitch:.32,thickness:.16,gableWidth:wing.width,gableDepth:wing.depth,wallHeight:wing.height},
+    {width:4.5,depth:1.8,center:[-.45,4],top:3.05,slope:.04,thickness:.12}];
+  const visitorRoofBoxes=visitorRoofs.map(r=>box([r.width,r.thickness+(r.pitch?r.width/2*r.pitch:r.depth*Math.abs(r.slope)),r.depth],[r.center[0],r.top+(r.pitch?r.width/4*r.pitch:0),r.center[1]]));
+  place('central-visitor-center','visitorCenter',visitorPosition,{width:visitorWidth,depth:visitorDepth,height:visitorHeight,walls:visitorWalls,structure:visitorStructure,
+    windows:[...visitorWindows,...wingWindows],doors:[...visitorDoors,...wingDoors],posts:visitorPosts,interior:visitorInterior,floors:visitorFloors,roofs:visitorRoofs,weatherVane:true,entryPlaqueX:1.75,mapPosition:[-2.22,1.7,1.1],
+    map:{bounds:hubGround.bounds,paths:hubGround.paths,position:[-5,5.9]}},[...visitorBodyWalls,...visitorRoofBoxes,...visitorFloors,
+      ...visitorInterior.map(b=>box([b.size[0]+.06,b.size[1]+.07,b.size[2]+.09],[b.offset[0],b.offset[1]+.035,b.offset[2]-.025]))]);
+  // 游客木廊与四臂功能雨棚合并为一个独立模型.
+  const galleryOrigin=[54.5,height,70.55],galleryRuns=[
+    {id:'court-front',position:[54.5,70.55],width:5.4,depth:1.8,top:3,yaw:0},
+    {id:'court-side',position:[50.05,62.4],width:7.6,depth:3,top:2.82,yaw:-Math.PI/2},
+    {id:'west-shade-a',position:[-33,62.2],width:8,depth:4,yaw:Math.PI},
+    {id:'west-shade-b',position:[17,74.9],width:7,depth:3,yaw:0},
+    {id:'south-shade-a',position:[66,8],width:9,depth:5,top:3.2,slope:.1,yaw:-Math.PI/2},
+    {id:'south-shade-b',position:[66,30],width:10,depth:5,top:3.2,slope:.1,yaw:-Math.PI/2},
+    {id:'north-supply',position:[54,91.7],width:6,depth:5,top:3.4,slope:.1,yaw:0},
+    {id:'east-workbay',position:[120,75],width:8,depth:4,top:3.2,slope:.08,yaw:0}
+  ].map(run=>{
+    const roof={width:run.width,depth:run.depth,top:run.top??3.1,slope:run.slope??.045,thickness:.12},z=roof.depth/2-.1,top=roof.top-roof.thickness/2+z*roof.slope-.22;
+    return {id:run.id,position:[run.position[0]-54.5,0,run.position[1]-70.55],yaw:run.yaw,roof,
+      posts:(run.id==='court-side'?[-3,-1,.15]:(run.id==='court-front'?[-.3,0,.4]:[-3/7,-1/7,3/7]).map(f=>f*roof.width)).map(x=>box([.18,top-.08,.18],[x,(top+.08)/2,z]))};
+  });
+  const galleryRoof=galleryRuns[0].roof,galleryPosts=galleryRuns[0].posts;
+  const galleryBoxes=galleryRuns.flatMap(run=>{
+    const face={position:run.position,yaw:run.yaw},r=run.roof;
+    return [...run.posts.map(p=>facadeBox(p.size,face,p.offset)),...run.posts.map(p=>facadeBox([.32,.08,.32],face,[p.offset[0],.04,p.offset[2]])),
+      facadeBox([r.width+.12,r.thickness+r.depth*Math.abs(r.slope),r.depth+.12],face,[0,r.top,0])];
+  });
+  place('central-gallery','hubGallery',galleryOrigin,{roof:galleryRoof,posts:galleryPosts,runs:galleryRuns},galleryBoxes);
+
+  // 港口维护点双向穿行, 墙洞和设备外观直接共用这些尺寸.
+  const hubShed={width:7,depth:6.4,height:3.05,floor:box([6.84,.12,6.24],[0,-.02,0]),roof:{width:7.6,depth:7,top:3.18,slope:.025,thickness:.14},door:{center:-.3,width:3.2,height:2.55},equipment:[
+    {...box([1.2,1.65,.65],[-1.9,.825,2.76]),kind:'cabinet'},
+    {...box([2.2,.88,.8],[.55,.44,2.7]),kind:'bench'},
+    {...box([1.45,.52,1.05],[4.45,.26,1.5]),kind:'materials'},
+    {...box([.92,1.46,.7],[-5,.73,1.9]),kind:'cabinet'}]};
+  const shedWalls=[box([hubShed.width,hubShed.height,.16],[0,hubShed.height/2,-hubShed.depth/2]),box([hubShed.width,hubShed.height,.16],[0,hubShed.height/2,hubShed.depth/2])];
+  for(const side of [-1,1]){const {center,width,height:dh}=hubShed.door,half=hubShed.depth/2-.08;
+    for(const [a,b]of [[-half,center-width/2],[center+width/2,half]])shedWalls.push(box([.16,hubShed.height,b-a],[side*hubShed.width/2,hubShed.height/2,(a+b)/2]));
+    shedWalls.push(box([.16,hubShed.height-dh,width],[side*hubShed.width/2,(hubShed.height+dh)/2,center]));
   }
+  place('central-maintenance-shed','hubMaintenance',[105,height,62],{...hubShed,walls:shedWalls},[...shedWalls,
+    hubShed.floor,box([hubShed.roof.width+.12,hubShed.roof.thickness+hubShed.roof.depth*hubShed.roof.slope,hubShed.roof.depth+.12],[0,hubShed.roof.top,0]),
+    ...hubShed.equipment.map(b=>box(b.size,b.offset))]);
+  const hubRocks=[[54.7,110,2.3,.62,1.6],[52,135,1.6,.48,2.1],[54.3,143,2.4,.72,1.8],
+    [68.5,130,1.1,.4,1.3],[52,104,1.35,.38,1.25]].map(([x,z,w,h,d],i)=>({position:hubPoint([x,hubSurface(x-60,z-68)-.12,z]),size:[w,h,d],yaw:i*.73}));
+  place('central-landscape-rocks','hubLandscape',hubRoot,{rocks:hubRocks},hubRocks.map(r=>facadeBox([r.size[0]*1.08,r.size[1]*.88,r.size[2]*1.08],r,[0,r.size[1]*.44,0])));
+
+  const hubBlocks=[
+    [[3.12,1.05,.22],[65.95,4.125,61.6]], [[.22,1.05,4.78],[67.4,4.125,59.1]],
+    [[.41,1.05,.22],[64.595,4.125,56.6]], [[.31,1.05,.22],[67.355,4.125,56.6]],
+    [[.22,1.05,.89],[64.5,4.125,57.155]], [[.22,1.05,.89],[64.5,4.125,61.045]],
+    [[2.3,.48,.36],[53.65,2.64,65.48]], [[.46,2.35,3.4],[24,3.575,60.9]],
+    [[2.4,2.35,.35],[54,3.575,97]], [[2.4,2.35,.35],[66.5,3.575,24]],
+    [[.42,2.35,4.5],[133,3.575,74.4]], [[7.2,.68,1.4],[-23,2.74,72.2],'planter'],
+    [[2.5,.68,2.1],[53.7,2.74,99.5],'planter'], [[2.4,.68,2.1],[66.4,2.74,39],'planter'],
+    [[2.4,.68,2.8],[131.4,2.74,75],'planter'], [[2.5,.68,1.4],[26.2,2.74,61.6],'planter'],
+    [[.34,1.02,7],[68.8,2.91,16.5]], [[.34,1.02,5],[68.8,2.91,35]],
+    [[5.2,.7,.4],[84.5,2.75,59.1]], [[.4,.9,2.8],[113.7,2.85,74.4]], [[2.7,.7,.4],[151,2.75,59.1]],
+    [[1.15,.62,2],[64.3,2.71,75.4],'planter'],
+    [[15,.14,.16],[-40.5,2.47,59.08],'edging'], [[14,.14,.16],[-38,2.47,77.42],'edging'],
+    [[.16,.14,12],[50.38,2.47,110],'edging'], [[.16,.14,19],[50.38,2.47,140.5],'edging'],
+    [[.16,.14,15],[69.22,2.47,27.5],'edging'], [[.16,.14,14],[69.22,2.47,-5],'edging'],
+    [[16,.14,.16],[90,2.47,77.62],'edging'], [[14,.14,.16],[146,2.47,59.08],'edging'],
+    [[.22,.5,3.5],[57.1,2.05,61.25]], [[2.5,.72,.4],[55,2.16,59.7]],
+    [[3.2,1.15,.26],[35,2.975,60.5]], [[2.8,1.1,.26],[145,2.95,75.9]]
+  ].map(([size,p,kind])=>({...box(size,hubPoint(p)),kind}));
+  const hubSigns=[{position:hubPoint([54,2.4,96.785]),slot:2,width:2,height:2.25,
+      routes:[{title:'海望山',subtitle:'COASTAL HILL',direction:'left'},{title:'神社公園',subtitle:'SHRINE PARK',direction:'right'}]},
+    {position:hubPoint([66.5,2.4,23.785]),slot:1,width:2,height:2.25,
+      routes:[{title:'貨物埠頭',subtitle:'CARGO TERMINAL',direction:'left'},{title:'海浜駅',subtitle:'COASTAL STATION',direction:'right'}]},
+    {position:hubPoint([24.27,2.4,60.9]),slot:0,width:2.6,height:2.25,yaw:-Math.PI/2,
+      routes:[{title:'神社公園',subtitle:'SHRINE PARK',direction:'left'},{title:'海浜駅',subtitle:'COASTAL STATION',direction:'right'}]},
+    {position:hubPoint([133.25,2.4,74.4]),slot:3,width:2.9,height:2.25,yaw:-Math.PI/2,
+      routes:[{title:'海望山',subtitle:'COASTAL HILL',direction:'left'},{title:'貨物埠頭',subtitle:'CARGO TERMINAL',direction:'right'}]}
+  ].map(sign=>({...sign,mount:'wall',panelHeight:1.2}));
+  const hubServices=[{kind:'bin',position:hubPoint([63.3,2.4,74.7]),yaw:Math.PI/2,size:[.48,.96,.42],color:0x5c7769},
+    {kind:'bin',position:hubPoint([39.8,2.4,71.1]),size:[.48,.96,.42],color:0x748471},
+    {kind:'fountain',position:hubPoint([54.8,1.8,64.8]),size:[.5,1.02,.5]},
+    {kind:'fountain',position:hubPoint([56.6,2.4,95.2]),yaw:-Math.PI/2,size:[.5,1.02,.5]}];
+  const hubFixtures={services:hubServices,blocks:hubBlocks,benches:hubBenches,signs:hubSigns,bikeRacks:hubBikeRacks,drains:hubDrains};
+  const hubFixtureBoxes=[...hubBlocks.map(b=>{const cap=b.kind==='planter'?.04:b.size[1]>.9?.08:0;return box([b.size[0]+(b.kind==='planter'?.1:0),b.size[1]+cap,b.size[2]+(b.kind==='planter'?.06:0)],[b.offset[0],b.offset[1]+cap/2,b.offset[2]]);}),
+    ...hubBenches.map(b=>facadeBox([b.width??1.9,.98,.58],{position:b.position,yaw:b.yaw??0},[0,.49,.03])),
+    ...hubServices.map(s=>facadeBox([s.size[0]+.02,s.size[1],s.size[2]+.02],s,[0,s.size[1]/2,0])),
+    ...hubBikeRacks.map(r=>facadeBox(r.size,r,[0,r.size[1]/2,0]))];
+  place('central-fixtures','hubFixtures',hubRoot,hubFixtures,hubFixtureBoxes);
+  // 四类活动点合批, 实体柜体由同一规格生成外观/碰撞, 道具不逐件注册实例.
+  const activitySites=[
+    {kind:'exhibit',position:hubPoint([-33,height,62.2]),yaw:Math.PI},
+    {kind:'exhibit',position:hubPoint([17,height,74.9]),yaw:0,displayZ:-3,rackZ:-3},
+    {kind:'exhibit',position:hubPoint([54.2,height+.04,82.3]),yaw:0},
+    {kind:'waiting',position:hubPoint([66,height,8]),yaw:-Math.PI/2},
+    {kind:'waiting',position:hubPoint([66,height,30]),yaw:-Math.PI/2},
+    {kind:'supply',position:hubPoint([54,height,91.7]),yaw:0},
+    {kind:'workshop',position:hubPoint([120,height,75]),yaw:0}
+  ].map(site=>({...site,table:site.kind==='supply'?box([.92,.12,.65],[1.95,.87,1.35]):undefined,cabinets:site.kind==='waiting'?[{...box([1.05,1.5,.5],[0,.79,1.4]),color:0x658272}]:
+    site.kind==='supply'?[box([1.25,1.8,.55],[-1.2,.94,1.6]),{...box([1.25,1.8,.55],[.4,.94,1.6]),color:0x84927b}]:
+    site.kind==='workshop'?[{...box([.8,1.65,.58],[-2.25,.86,1.38]),color:0x6a8772}]:[]}));
+  const activityBoxes=activitySites.flatMap(site=>[
+    ...site.cabinets.map(b=>facadeBox([b.size[0],b.size[1]+.08,b.size[2]+.08],site,[b.offset[0],b.offset[1]-.04,b.offset[2]-.04])),
+    ...(site.table?[facadeBox([site.table.size[0],site.table.offset[1]+site.table.size[1]/2,site.table.size[2]],site,[site.table.offset[0],(site.table.offset[1]+site.table.size[1]/2)/2,site.table.offset[2]])]:[]),
+    ...(site.kind==='exhibit'?[facadeBox([4.8,1.26,.15],site,[0,1.5,1.25]),facadeBox([1.26,.6,.62],site,[2.35,.3,site.displayZ??-.65]),facadeBox([.8,1.15,.24],site,[-2.5,.575,site.rackZ??-.55])]:[]),
+    ...(site.kind==='waiting'?[-1.25,1.25].map(x=>facadeBox([.52,.91,.55],site,[x,.455,.83])):[]),
+    ...(site.kind==='workshop'?[facadeBox([2.8,.98,.8],site,[0,.49,1.2]),facadeBox([.5,.8,.8],site,[2.55,.4,1.12]),facadeBox([.82,.66,.66],site,[2.5,.33,-.6])]:[])
+  ]);
+  place('central-activity-details','hubActivity',hubRoot,{sites:activitySites},activityBoxes);
+
+  const plantingPatches=[...[[-46,73,-39,77],[-13,59,-4,62],[63.8,93,69,96],[66,14,69,19],[52.4,85.7,57,87.3]].map(rect=>({rect:hubRect(rect),y:height,kind:'flower'})),
+    ...hubBlocks.filter(b=>b.kind==='planter').map(b=>({rect:[b.offset[0]-b.size[0]/2+.24,b.offset[2]-b.size[2]/2+.24,b.offset[0]+b.size[0]/2-.24,b.offset[2]+b.size[2]/2-.24],y:b.offset[1]+b.size[1]/2-.125,kind:'shrub',raised:true})),
+    ...[[-49,59,-40,65],[-26,59,-15,63],[28,59,46,62],[5,76,27,77.7],
+      [50.5,102,56.5,114],[50.5,126,56.5,137],[50.5,140,56.5,151],
+      [66.8,-14,69.5,2],[66.8,16,69.5,23],[50.5,16,52.3,23],[64.5,75,67.5,77.5],
+      [76,75,97,77.5],[114,59,123,60],[151,74.5,168,77.5]].map(rect=>({rect:hubRect(rect),y:height,kind:'shrub',scale:1.8}))];
+  const hubGrassExclusions=[...hubPads,...activityBoxes.map(b=>[b.offset[0]-b.size[0]/2-.2,b.offset[2]-b.size[2]/2-.2,b.offset[0]+b.size[0]/2+.2,b.offset[2]+b.size[2]/2+.2]),...hubGround.insets.map(([a,b,c,d])=>[a-.2,b-.2,c+.2,d+.2]),...hubFixtureBoxes.map(b=>[b.offset[0]-b.size[0]/2-.22,b.offset[2]-b.size[2]/2-.22,b.offset[0]+b.size[0]/2+.22,b.offset[2]+b.size[2]/2+.22]),
+    ...hubRocks.map(r=>[r.position[0]-r.size[0]/2-.25,r.position[2]-r.size[2]/2-.25,r.position[0]+r.size[0]/2+.25,r.position[2]+r.size[2]/2+.25])];
+  const hubPlantingExclusions=[...hubGrassExclusions,...hubTrees.map(([x,,z])=>hubRect([x-.52,z-.52,x+.52,z+.52]))];
+  place('central-grass','hubGrass',hubRoot,{soil:hubSoil,y:height,turf:hubTurf,paths:hubGround.paths,exclusions:hubGrassExclusions,
+    treeBases:hubGround.treeBases,landforms:hubLandforms,spacing:.36,tallDensity:.34,maxShort:12000,maxTall:800});
+  place('central-planting','hubPlanting',hubRoot,{patches:plantingPatches,paths:hubGround.paths,exclusions:hubPlantingExclusions,landforms:hubLandforms,budgets:{shrub:360,flower:42},seed:361});
+  regionPlan.center.routes={paths:hubPaths,courtyard:{bounds:[52.5,59.5,57.2,65.5],y:1.8,entries:[[52.3,2.4,61.7],[56.1,2.4,65.6]]},
+    terrace:{bounds:[64.5,56.6,67.4,61.6],y:3.6,entries:[[62.3,2.4,59.1],[66,2.4,49.8]]},
+    gallery:{position:galleryOrigin,width:galleryRoof.width,depth:galleryRoof.depth,runs:galleryRuns},
+    maintenance:{position:[105,2.4,62],doors:[[101.5,2.44,61.7],[108.5,2.44,61.7]]},
+    visitor:{position:visitorPosition,doors:[[55.2,2.44,71.1],[55.2,2.44,76.7]],exhibition:{bounds:[51,79.5,57.4,85.1],door:[54.8,2.44,79.5]}},
+    approaches:{station:[[0,58],[50,39]],park:[[0,78],[49.5,123]],hill:[[70,116],[108,78],[160,78]],port:[[70,44],[78,58],[146,58]]},
+    pockets:[{kind:'exhibit',position:[-33,2.4,62.2]},{kind:'exhibit',position:[17,2.4,74.9]},
+      {kind:'supply',position:[54,2.4,91.7]},{kind:'trail',position:[53.7,2.4,99.5]},
+      {kind:'waiting',position:[66,2.4,8]},{kind:'waiting',position:[66,2.4,30]},
+      {kind:'workshop',position:[120,2.4,75]},{kind:'port',position:[145,2.4,75.9]}]};
 
   // 西北公园: 南北参道, 西侧园林, 东侧湖面与北侧拜殿; 环路与东侧出口不封闭.
   const parkY = height + .024;
@@ -947,6 +1196,8 @@
     const form = i === 13 ? { spread: 1.35, growth: .9 } : i === 14 ? { spread: .9, growth: 1.08 } : i === 18 ? { spread: 1.2, growth: .97 } : { spread: .84 + (i * 7 % 6) * .06, growth: .92 + (i * 5 % 7) * .025 };
     place('park-tree-' + i, 'parkTree', [x, parkY + terrainLevel(x, z) + (i === 15 ? .08 : 0), z], { seed: 511 + i * 17, kind: [17, 18, 27, 37].includes(i) ? 'maple' : 'camphor', ...form }, [box([.48, 5.3, .48], [0, 2.57, 0])], [0, i * .7, 0], [scale, scale, scale]);
   });
+  // 复用树模型时保留原公园的首次资源初始化次序, 不让中央树改变原树冠随机序列.
+  for(const [i,p]of hubTrees.entries())place('central-tree-'+i,'parkTree',p,{seed:850+i,kind:'maple',spread:.43,growth:i===10?1.3:1.08},[box([.48,3,.48],[0,1.5,0])],[0,0,0],i===10?[1.8,1,1.8]:[1.35,1,1.35]);
   parkShrubs.forEach(([x, z, w, d, h], i) => place('park-grove-shrub-' + i, 'lowHedge', [x, parkY + terrainLevel(x, z), z], { width: w, depth: d, height: h, seed: 871 + i * 31, dense: true, natural: true }));
   for (const [i, [x, z, yaw]] of [[-29, 96, Math.PI / 2], [7, 136, Math.PI / 2], [-17.5, 138, -Math.PI / 2], [25, 148.5, Math.PI]].entries()) {
     place('park-bench-pad-' + i, 'pocketPaving', [x, height, z], { width: 3.2, depth: 2.3, stone: true }, [box([3.2, .078, 2.3], [0, .039, 0])]);
@@ -1151,10 +1402,16 @@
   place('enoshima', 'enoshimaIsland', [132, -2, -640]);
   place('summer-clouds', 'coastalSky', [0, 0, 0], { steps: 48, sun });
   place('sun-rays', 'sunRays', [0, 0, 0], { sun, samples: 32, strength: .65 });
+  place('surface-shadow-filter','surfaceShadows',[0,0,0],{excludeMeshes:['hub-ground-surface'],receivers:['central-ground','central-visitor-center','central-gallery','central-fixtures','central-maintenance-shed','central-landscape-rocks','central-activity-details','port-cargo-stacks']});
   place('character-shadows', 'characterShadows', [0, 0, 0], { sun });
   place('park-ground-shadow-cache', 'groundShadowCache', [0, 0, 0], {
     bounds: [-49.3, 78, 49.3, 153.4], resolution: 2048,
     receivers: ['northwest-park-ground', 'park-soft-landforms'], followers: ['park-forest-floor']
+  });
+  // 地面过滤遮蔽可见性, 让远处灯杆细影随像素面积渐淡; 岸壁/挡土墙保留独立深度投影.
+  place('hub-ground-shadow-cache','groundShadowCache',[0,0,0],{
+    bounds:[-50,-18,170,154],resolution:2048,minUp:.5,excludeMeshes:['hub-ground-retaining'],
+    receivers:['central-ground','port-ground'],followers:['central-grass']
   });
   place('seagull-flocks', 'seagullFlock', [0, 0, 0]);
   // 花带止于楼梯和侧向通道前, 复用低石花坛; 土面高 .1 米, 花根略埋入土中.
@@ -1209,6 +1466,7 @@
       lowHedge: 'models/low-hedge.js', drinkingFountain: 'models/drinking-fountain.js',
       coastalBeach: 'models/coastal-beach.js', stationNeighborhood: 'models/station-neighborhood.js',
       districtGround: 'models/district-ground.js',
+      hubActivity: 'models/hub-activity.js', hubMaintenance: 'models/hub-maintenance.js', hubLandscape: 'models/hub-landscape.js', hubGround: 'models/hub-ground.js', hubGallery: 'models/hub-gallery.js', visitorCenter: 'models/visitor-center.js', hubFixtures: 'models/hub-fixtures.js', hubPlanting: 'models/hub-planting.js', hubGrass: 'models/hub-grass.js',
       portGround: 'models/port-ground.js', cargoContainer: 'models/cargo-container.js', portAccess: 'models/port-access.js',
       portReachstacker: 'models/port-reachstacker.js', portForklift: 'models/port-forklift.js', portTerminalTractor: 'models/port-terminal-tractor.js',
       portCargoWorkarea: 'models/port-cargo-workarea.js', portService: 'models/port-service.js',
@@ -1231,6 +1489,7 @@
       lawn: 'models/lawn.js',
       sunlightShaft: 'models/sunlight-shaft.js',
       sunRays: 'models/sun-rays.js',
+      surfaceShadows: 'models/surface-shadows.js',
       characterShadows: 'models/character-shadows.js',
       groundShadowCache: 'models/ground-shadow-cache.js',
       japaneseCottage: 'models/japanese-cottage.js', japaneseMachiya: 'models/japanese-machiya.js', japaneseResidence: 'models/japanese-residence.js',

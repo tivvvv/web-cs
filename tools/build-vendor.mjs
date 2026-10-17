@@ -6,7 +6,7 @@ await build({
     Scene, Group, Object3D, PerspectiveCamera, OrthographicCamera, WebGLRenderer, WebGLRenderTarget, Color, Fog,
     AmbientLight, HemisphereLight, DirectionalLight, PointLight,
     Vector2, Vector3, Euler, Matrix4, Box3, Box3Helper, Frustum, Raycaster,
-    Mesh, InstancedMesh, Line, LineSegments, BufferGeometry, Float32BufferAttribute,
+    Mesh, InstancedMesh, Line, LineSegments, BufferGeometry, Float32BufferAttribute, DynamicDrawUsage,
     BoxGeometry, CylinderGeometry, PlaneGeometry, SphereGeometry, ConeGeometry, RingGeometry,
     IcosahedronGeometry, TorusGeometry, Shape, Path, ShapeGeometry, ExtrudeGeometry,
     MeshStandardMaterial, MeshPhysicalMaterial, MeshBasicMaterial, ShaderMaterial,

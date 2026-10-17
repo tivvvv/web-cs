@@ -1,6 +1,6 @@
 // 江之电风格双节电车. X 为车长方向, 门窗保留实际开口和车内空间.
 FPS.models.enodenTrain = (T, options = {}) => {
-  const root = new T.Group(), parts = new Map();
+  const root = new T.Group(), parts = new Map(), maps = [];
   const material = (color, roughness = .55, metalness = .15) => new T.MeshStandardMaterial({ color, roughness, metalness });
   const green = new T.MeshPhysicalMaterial({ color: 0x16796e, roughness: .34, metalness: .08, clearcoat: .7, clearcoatRoughness: .22, vertexColors: true });
   const cream = new T.MeshPhysicalMaterial({ color: 0xe4ddbc, roughness: .42, metalness: .06, clearcoat: .6, clearcoatRoughness: .26, vertexColors: true });
@@ -15,6 +15,7 @@ FPS.models.enodenTrain = (T, options = {}) => {
   }
   enamelContext.putImageData(enamelPixels, 0, 0);
   const enamelMap = new T.CanvasTexture(enamel); enamelMap.wrapS = enamelMap.wrapT = T.RepeatWrapping; enamelMap.repeat.set(4, 2);
+  enamelMap.anisotropy = 8; maps.push(enamelMap);
   for (const m of [green, cream]) { m.roughnessMap = enamelMap; m.bumpMap = enamelMap; m.bumpScale = .003; }
   const metal = material(0x9ca9a7, .3, .78), dark = material(0x252e31, .7, .5);
   const rubber = material(0x162024, .95, .05), roof = material(0x758584, .7, .45);
@@ -49,7 +50,7 @@ FPS.models.enodenTrain = (T, options = {}) => {
     const ctx = c.getContext('2d'); ctx.fillStyle = bg; ctx.fillRect(0, 0, 768, 256);
     ctx.textAlign = 'center'; ctx.fillStyle = fg; ctx.font = '600 110px sans-serif'; ctx.fillText(text, 384, 135);
     ctx.font = '32px sans-serif'; ctx.fillText(subtext, 384, 205);
-    const map = new T.CanvasTexture(c); map.colorSpace = T.SRGBColorSpace;
+    const map = new T.CanvasTexture(c); map.colorSpace = T.SRGBColorSpace; map.anisotropy = 8; maps.push(map);
     return { geo: new T.PlaneGeometry(w, h), mat: new T.MeshStandardMaterial({ map, roughness: .6, side: T.DoubleSide }) };
   }
   const destination = lettering('鎌倉', 'KAMAKURA', 1.15, .36);
@@ -178,5 +179,5 @@ FPS.models.enodenTrain = (T, options = {}) => {
     new Set([...flat, ...geometries]).forEach(g => g.dispose());
   }
   destination.geo.dispose(); logo.geo.dispose();
-  return { root };
+  let disposed = false; return { root, dispose() { if (disposed) return; disposed = true; maps.forEach(map => map.dispose()); } };
 };

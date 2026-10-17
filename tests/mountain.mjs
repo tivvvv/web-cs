@@ -36,7 +36,7 @@ vm.runInContext(`const T=THREE, scene=new T.Scene(), camera=new T.PerspectiveCam
 const t=c.t;
 for(const entry of layout.instances.filter(i=>i.collision.enabled&&!i.collision.dynamic&&!i.attach))t.createInstance({...entry,model:'collisionOnly',traversal:undefined});
 const allSolids=[...t.solid],terrain=allSolids.find(s=>s.id==='mountain-terrain'&&s.box.heightfield);
-assert(terrain);assert.equal(allSolids.filter(s=>s.box.heightfield).length,1);
+assert(terrain);assert.equal(allSolids.filter(s=>s.id.startsWith('mountain-')&&s.box.heightfield).length,1);
 assert(allSolids.filter(s=>s.id.startsWith('mountain-')).length<200,'山体实体过量');
 function select(points){const xs=points.map(p=>p[0]),zs=points.map(p=>p[2]);const range=new T.Box3(new T.Vector3(Math.min(...xs)-.7,-2,Math.min(...zs)-.7),new T.Vector3(Math.max(...xs)+.7,45,Math.max(...zs)+.7));
  t.solid.splice(0,t.solid.length,...allSolids.filter(s=>s.box.intersectsBox(range)));}
@@ -84,10 +84,14 @@ for(const path of walkingPaths){let samples=0,peakSlope=0;
  }
  console.log('PASS 五条横向走线/20~144 FPS/步行奔跑往返 '+path.id);
 }
+const hubPaths=layout.regionPlan.center.routes.paths;
+const hubRoute=id=>hubPaths.find(p=>p.id===id).points.map(([x,z])=>[x,2.4,z]);
+// 跨区回归使用当前步行图, 不沿旧直线穿越新布局中的座椅/种植岛.
+const centralToHill=[[50,2.4,68],[60,2.4,68],[60,2.4,78],[60,2.4,116],...hubRoute('hill-west-link').slice(1)];
 for(const path of [
  [[140,26.4,136.4],[140,26.4,137],[133,26.4,137],[128.5,26.4,136]],
  [[144.8,19.8,119],[144.8,19.8,121],[145,19.8,136],[144,19.8,138.2],[143.6,19.8,138.2]],
- [[50,2.4,68],[50,2.4,66],[60,2.4,66],[60,2.4,68],[64,2.4,70],[64,2.4,78]]
+ centralToHill
 ]){select(path);spawn([path[0][0],path[0][1]+.1,path[0][2]]);for(const p of path.slice(1))walk(p);for(const p of path.slice(0,-1).reverse())walk(p);}
 console.log('PASS 三条自然上山线, 山顶连接/崖边栈道与中央广场绕行');
 function freeze(v){if(v&&typeof v==='object'){Object.values(v).forEach(freeze);Object.freeze(v);}return v;}
@@ -203,8 +207,8 @@ let grassCount=0,grassTriangles=0;
 for(const mesh of grass.meshes) {
  const tall=mesh.name==='mountain-tall-grass',g=mesh.geometry,p=g.attributes.position,a=new T.Vector3(),b=new T.Vector3(),d=new T.Vector3();
  assert(mesh.isInstancedMesh&&!mesh.castShadow&&mesh.receiveShadow&&!mesh.material.transparent&&mesh.material.side===T.DoubleSide,'草甸新增透明排序/细叶投影');
- assert(mesh.count<=(tall?400:8500));grassCount+=mesh.count;grassTriangles+=p.count/3*mesh.count;
- for(let i=0;i<p.count;i+=3){a.fromBufferAttribute(p,i);b.fromBufferAttribute(p,i+1).sub(a);d.fromBufferAttribute(p,i+2).sub(a);assert(b.cross(d).lengthSq()>1e-10,'草叶退化三角面');}
+ assert(mesh.count<=(tall?400:8500));grassCount+=mesh.count;grassTriangles+=(g.index?.count??p.count)/3*mesh.count;
+ for(let i=0;i<(g.index?.count??p.count);i+=3){a.fromBufferAttribute(p,g.index?g.index.getX(i):i);b.fromBufferAttribute(p,g.index?g.index.getX(i+1):i+1).sub(a);d.fromBufferAttribute(p,g.index?g.index.getX(i+2):i+2).sub(a);assert(b.cross(d).lengthSq()>1e-10,'草叶退化三角面');}
  const hits=[];mesh.raycast(ray,hits);assert.equal(hits.length,0,'草叶遮挡射击');
  for(let i=0;i<mesh.count;i++) {
   mesh.getMatrixAt(i,pose);point.setFromMatrixPosition(pose);const local=point.clone(),world=point.clone().add(new T.Vector3(...grass.data.position)),surface=t.terrainSurface(world,0,terrain.box);

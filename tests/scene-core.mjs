@@ -131,8 +131,13 @@ for (const file of ['scene-layout.js', 'scene-kamakura.js']) {
   let shots = 0; const actor = active[2], originalShoot = t.api.shoot, originalPosition = new T.Vector3(610, 0, 0);
   actor.root.position.set(610, 0, 0); actor.update = updates[2];
   t.api.shoot = (from, direction, team, damage) => { assert(from.toArray().every(Number.isFinite)); assert(Math.abs(direction.length() - 1) < 1e-8); assert.equal(team, 'enemy'); assert(damage > 0); shots++; };
-  for (let i = 0; i < 240; i++) actor.update(1 / 60, t.api);
-  assert(actor.root.position.distanceTo(originalPosition) > .1, '敌人 AI 未移动');
+  // 横移可能回到起点, 用过程位移判断移动, 避免末帧净位移误报.
+  let maxExcursion = 0, travelled = 0; const previousPosition = originalPosition.clone();
+  for (let i = 0; i < 240; i++) {
+    actor.update(1 / 60, t.api); travelled += actor.root.position.distanceTo(previousPosition);
+    maxExcursion = Math.max(maxExcursion, actor.root.position.distanceTo(originalPosition)); previousPosition.copy(actor.root.position);
+  }
+  assert(maxExcursion > .1 && travelled > .5, '敌人 AI 未移动');
   assert(shots > 0, '敌人 AI 未开火'); t.api.shoot = originalShoot; actor.update = () => {};
   const beforeBlur = t.snapshot().time; f.listeners.get('window:blur')(); advance(.2); assert.equal(t.snapshot().time, beforeBlur); t.reset();
   t.clearEffects();

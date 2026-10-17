@@ -4,7 +4,8 @@ FPS.models.groundShadowCache = (T, o = {}) => {
   const bounds = o.bounds ?? [-1, -1, 1, 1], [x0, z0, x1, z1] = bounds, width = x1 - x0, depth = z1 - z0;
   if (!bounds.every(Number.isFinite) || width <= 0 || depth <= 0) throw Error('地表阴影缓存范围无效');
   if (!Number.isInteger(o.resolution ?? 2048) || (o.resolution ?? 2048) < 1) throw Error('地表阴影缓存尺寸无效');
-  const names = new Set(o.receivers ?? []), followers = new Set(o.followers ?? []), roots = new WeakSet(), patched = new Map();
+  if (!Number.isFinite(o.minUp ?? -1) || (o.minUp ?? -1) < -1 || (o.minUp ?? -1) > 1) throw Error('地表阴影朝上阈值无效');
+  const names = new Set(o.receivers ?? []), followers = new Set(o.followers ?? []), excluded = new Set(o.excludeMeshes ?? []), roots = new WeakSet(), patched = new Map();
   const origin = new T.Vector2(x0, z1), scale = new T.Vector2(1 / width, -1 / depth);
   const uniforms = { groundShadowMap: { value: null }, groundShadowOrigin: { value: origin }, groundShadowScale: { value: scale }, groundShadowEnabled: { value: 0 } };
   const bakeUniforms = { shadowDepth: { value: null }, shadowMatrix: { value: new T.Matrix4() }, shadowSize: { value: new T.Vector2() }, shadowBias: { value: 0 }, shadowNormalBias: { value: 0 }, shadowIntensity: { value: 1 } };
@@ -48,11 +49,12 @@ FPS.models.groundShadowCache = (T, o = {}) => {
   const fragment = `
     #ifdef USE_SHADOWMAP
       uniform sampler2D groundShadowMap;
-      uniform float groundShadowEnabled;
+      uniform float groundShadowEnabled, groundShadowMinUp;
       varying vec2 vGroundShadowUv;
+      varying float vGroundShadowUp;
       float getShadow(sampler2D depths,vec2 size,float intensity,float bias,float radius,vec4 coord){
         #if defined(SHADOWMAP_TYPE_PCF_SOFT) && NUM_DIR_LIGHT_SHADOWS == 1 && NUM_SPOT_LIGHT_SHADOWS == 0
-          if(groundShadowEnabled>.5&&all(greaterThanEqual(vGroundShadowUv,vec2(0.)))&&all(lessThanEqual(vGroundShadowUv,vec2(1.))))
+          if(groundShadowEnabled>.5&&vGroundShadowUp>=groundShadowMinUp&&all(greaterThanEqual(vGroundShadowUv,vec2(0.)))&&all(lessThanEqual(vGroundShadowUv,vec2(1.))))
             return texture2D(groundShadowMap,vGroundShadowUv).r;
         #endif
         return uncachedGroundShadow(depths,size,intensity,bias,radius,coord);
@@ -61,25 +63,26 @@ FPS.models.groundShadowCache = (T, o = {}) => {
   `;
   let target, light, dirty = true, receiversDirty = false, disposed = false;
   const box = new T.Box3(), clearColor = new T.Color();
-  function patch(m) {
+  function patch(m, follower) {
     if (!m.isMeshStandardMaterial || patched.has(m)) return;
     const original = { compile: m.onBeforeCompile, key: m.customProgramCacheKey, active: true };
     original.context = Object.create(m); original.context.onBeforeCompile = original.compile;
     original.wrapper = function(shader, renderer) {
       original.compile.call(this, shader, renderer); if (disposed || !original.active) return;
-      Object.assign(shader.uniforms, uniforms);
-      shader.vertexShader = 'uniform vec2 groundShadowOrigin, groundShadowScale; varying vec2 vGroundShadowUv;\n' + shader.vertexShader;
+      Object.assign(shader.uniforms, uniforms, { groundShadowMinUp: { value: follower ? -1 : (o.minUp ?? -1) } });
+      shader.vertexShader = 'uniform vec2 groundShadowOrigin, groundShadowScale; varying vec2 vGroundShadowUv; varying float vGroundShadowUp;\n' + shader.vertexShader;
       shader.vertexShader = shader.vertexShader.replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
         vec4 groundWorld=vec4(transformed,1.);
         #ifdef USE_INSTANCING
           groundWorld=instanceMatrix*groundWorld;
         #endif
-        vGroundShadowUv=((modelMatrix*groundWorld).xz-groundShadowOrigin)*groundShadowScale;`);
+        vGroundShadowUv=((modelMatrix*groundWorld).xz-groundShadowOrigin)*groundShadowScale;
+        vGroundShadowUp=inverseTransformDirection(normalize(transformedNormal),viewMatrix).y;`);
       // 只包覆阴影采样函数, 不展开照明段; 角色补丁以任意顺序接入均可保留.
       shader.fragmentShader = shader.fragmentShader.replace('#include <shadowmap_pars_fragment>',
         T.ShaderChunk.shadowmap_pars_fragment.replace('float getShadow(', 'float uncachedGroundShadow(') + fragment);
     };
-    original.cache = function() { return original.key.call(original.context) + (!disposed && original.active ? '/ground-shadow-cache-v1' : ''); };
+    original.cache = function() { return original.key.call(original.context) + (!disposed && original.active ? '/ground-shadow-cache-v2' : ''); };
     original.remove = () => {
       original.active = false;
       if (m.onBeforeCompile === original.wrapper) m.onBeforeCompile = original.compile;
@@ -98,8 +101,8 @@ FPS.models.groundShadowCache = (T, o = {}) => {
     for (const child of scene.children) if ((names.has(child.name) || followers.has(child.name)) && (!roots.has(child) || receiversDirty)) {
       const fresh = !roots.has(child); child.updateWorldMatrix(true, true);
       child.traverse(n => {
-        if (!n.isMesh || !n.receiveShadow) return;
-        for (const m of Array.isArray(n.material) ? n.material : [n.material]) patch(m);
+        if (!n.isMesh || !n.receiveShadow || excluded.has(n.name)) return;
+        for (const m of Array.isArray(n.material) ? n.material : [n.material]) patch(m, followers.has(child.name));
         if (fresh && names.has(child.name) && !n.isInstancedMesh) {
           const copy = new T.Mesh(n.geometry, material); copy.matrixAutoUpdate = false; copy.matrix.copy(n.matrixWorld); surfaces.add(copy);
           box.union(new T.Box3().setFromObject(n)); dirty = true;

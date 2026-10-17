@@ -18,7 +18,8 @@ FPS.models.waterIris = (T, o = {}) => {
       };
       for (let k = 0; k < 5; k++) {
         const t = k / 5, u = (k + 1) / 5;
-        vertices.push(...point(t, -1), ...point(t, 1), ...point(u, 1), ...point(t, -1), ...point(u, 1), ...point(u, -1));
+        if (k > 0) vertices.push(...point(t, -1), ...point(t, 1), ...point(u, 1));
+        if (k < 4) vertices.push(...point(t, -1), ...point(u, 1), ...point(u, -1));
       }
       const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(vertices, 3));
       g.computeVertexNormals(); add(g, [0x4e7050, 0x67824f, 0x799053][j % 3]);

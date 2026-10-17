@@ -6,7 +6,12 @@ FPS.models.communityBoard = T => {
     box([.09, 2.28, .09], [x, 1.14, 0]);
     box([.23, .08, .28], [x, .04, 0]);
   }
-  box([1.9, 1.27, .12], [0, 1.55, 0]);
+  // 印字面占据框内真实开口, 背板退到后方, 远看也没有贴片与整板抢深度.
+  box([1.9, 1.27, .04], [0, 1.55, -.04]);
+  for (const side of [-1, 1]) {
+    box([.07, 1.1, .12], [side * .915, 1.55, 0]);
+    box([1.9, .085, .12], [0, 1.55 + side * .5925, 0]);
+  }
   box([2.06, .07, .36], [0, 2.22, .035]);
   const frame = new T.Mesh(T.mergeGeometries(parts), new T.MeshStandardMaterial({ color: 0x455f57, roughness: .76 }));
   frame.castShadow = frame.receiveShadow = true; root.add(frame); parts.forEach(g => g.dispose());
@@ -29,6 +34,9 @@ FPS.models.communityBoard = T => {
   ctx.font = '17px sans-serif';
   ['海岸清掃', '日曜日  9:00', '駐輪は指定場所へ', '住宅街は静かに'].forEach((s, i) => ctx.fillText(s, 319, 148 + i * 38));
   const map = new T.CanvasTexture(canvas); map.colorSpace = T.SRGBColorSpace; map.anisotropy = 4;
-  const panel = new T.Mesh(new T.PlaneGeometry(1.76, 1.1), new T.MeshStandardMaterial({ map, roughness: .94 }));
-  panel.position.set(0, 1.55, .066); panel.receiveShadow = true; root.add(panel); return { root };
+  const geometry = new T.BoxGeometry(1.76, 1.1, .06), uv = geometry.attributes.uv, n = geometry.attributes.normal;
+  for (let i = 0; i < uv.count; i++) if (n.getZ(i) < .5) uv.setXY(i, .01, .99);
+  const panel = new T.Mesh(geometry, new T.MeshStandardMaterial({ map, roughness: .94 }));
+  panel.position.set(0, 1.55, .03); panel.receiveShadow = true; root.add(panel);
+  let disposed = false; return { root, dispose() { if (disposed) return; disposed = true; map.dispose(); } };
 };

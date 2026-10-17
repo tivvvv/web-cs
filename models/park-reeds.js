@@ -19,7 +19,8 @@ FPS.models.parkReeds = (T, o = {}) => {
       };
       for (let k = 0; k < 4; k++) {
         const t = k / 4, u = (k + 1) / 4;
-        vertices.push(...at(t, -1), ...at(t, 1), ...at(u, 1), ...at(t, -1), ...at(u, 1), ...at(u, -1));
+        if (k > 0) vertices.push(...at(t, -1), ...at(t, 1), ...at(u, 1));
+        if (k < 3) vertices.push(...at(t, -1), ...at(u, 1), ...at(u, -1));
       }
       const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(vertices, 3)); g.computeVertexNormals(); add(g, [0x6f8551, 0x859660, 0x536d45][j % 3]);
     }

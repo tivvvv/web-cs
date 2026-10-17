@@ -87,6 +87,7 @@ FPS.models.characterShadows = (T, o = {}) => {
   }
   return {
     root,
+    prepare(renderer, scene, view) { this.beforeRender(renderer, scene, view); },
     update(dt, api) { player = api.player; elapsed = dt; },
     beforeRender(renderer, scene, view) {
       if (disposed) return;

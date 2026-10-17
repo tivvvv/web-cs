@@ -178,7 +178,7 @@ FPS.models.trailFacilities = (T, o = {}) => {
         const along=t=>[x,1.38+Math.cos(angle)*t,-.1+Math.sin(angle)*t];
         for(const side of [-1,1]) {
           const aperture=side>0?.068:.061,radius=side>0?.102:.082,rotation=[angle-side*Math.PI/2,0,0];
-          add(new T.CylinderGeometry(radius,radius,.05,16,1,true),side>0?0x293c36:0x829389,0,along(side*.282),[angle,0,0]);
+          add(new T.CylinderGeometry(radius,radius,.05,16,1,true),side>0?0x293c36:0x344b40,0,along(side*.282),[angle,0,0]);
           add(insideTube(aperture,.042),0x1d302c,0,along(side*.286),[angle,0,0]);
           add(new T.RingGeometry(aperture,radius,16),side>0?0x293c36:0xa2b0a0,0,along(side*.307),rotation);
           add(lens(aperture),0xffffff,3,along(side*.275),rotation);
@@ -188,10 +188,18 @@ FPS.models.trailFacilities = (T, o = {}) => {
         add(new T.CylinderGeometry(.068,.068,.04,10),0x314842,0,[x,1.342,-.388],[angle,0,0]);
       }
     }
-    box([.05,.24,.12],[.28,1.12,-.04],0x6e7562);
+    if(o.weathered){
+      // 投币口由前框留出真实凹槽, 背板内退2.2厘米, 不靠黑贴片模拟.
+      box([.028,.24,.12],[.269,1.12,-.04],0x334d41);
+      for(const side of [-1,1])box([.022,.24,.054],[.294,1.12,-.04+side*.033],0x7f8f79);
+      box([.022,.125,.012],[.294,1.0625,-.04],0x7f8f79);
+      box([.022,.065,.012],[.294,1.2075,-.04],0x7f8f79);
+      box([.06,.04,.06],[.24,1.2,-.04],0x6e8171);
+    }else box([.05,.24,.12],[.28,1.12,-.04],0x6e7562);
     if(o.weathered) {
       box([.2,.11,.23],[0,1.335,-.05],0x6e8176);
       add(new T.CylinderGeometry(.05,.055,.09,12),0x314b41,0,[0,1.435,-.015],[Math.PI/2-.13,0,0]);
+      for(let i=0;i<6;i++){const a=i*Math.PI/3;box([.015,.027,.055],[Math.cos(a)*.051,1.435+Math.sin(a)*.051,-.015],0x50695a,0,[0,0,a]);}
       add(new T.CylinderGeometry(.058,.058,.5,10),0x566c61,0,[0,1.25,-.07],[0,0,Math.PI/2]);
       for(const x of [-.265,.265])add(new T.CylinderGeometry(.045,.045,.024,8),0xabb3a0,0,[x,1.25,-.07],[0,0,Math.PI/2]);
       for(const x of [-.22,.22])for(const z of [-.22,.22])bolt([x,.175,z],'top');
@@ -244,5 +252,5 @@ FPS.models.trailFacilities = (T, o = {}) => {
   parts.forEach((batch, i) => { if (!batch.length) return;
     const glass=o.weathered&&i===3,material=glass?new T.MeshPhysicalMaterial({vertexColors:true,roughness:.14,metalness:0,clearcoat:1,clearcoatRoughness:.09,envMapIntensity:1.1}):new T.MeshStandardMaterial(surfaces[i]);
     const mesh = new T.Mesh(T.mergeGeometries(batch),material); mesh.name = i === 5 ? 'mountain-planter-soil' : glass?'mountain-scope-glass':'mountain-street-fixtures'; mesh.castShadow = !glass;mesh.receiveShadow = true; root.add(mesh); batch.forEach(g => g.dispose()); });
-  return { root, onHit(hit) { if (hit.object.name === 'mountain-planter-soil') return { bulletmark: false, surface: 'soil' }; }, dispose() { labels.dispose(); grain.dispose();woodMap?.dispose(); } };
+  let disposed=false;return { root, onHit(hit) { if (hit.object.name === 'mountain-planter-soil') return { bulletmark: false, surface: 'soil' }; }, dispose() { if(disposed)return;disposed=true; labels.dispose(); grain.dispose();woodMap?.dispose(); } };
 };

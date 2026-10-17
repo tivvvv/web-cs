@@ -19,22 +19,31 @@ FPS.models.mountainGrass = (T, o = {}) => {
     }
     return weight;
   }
-  const segments=(o.paths??[]).flatMap(path=>path.points.slice(1).map((b,i)=>({a:path.points[i],b,width:path.width})));
+  // 只有 2.6 米内的路肩会改变草丛分布; 先分桶, 不让每株候选草重复扫描整座山的路线.
+  const routeCells=new Map(),cellSize=8;
+  for(const path of o.paths??[])for(let i=1;i<path.points.length;i++) {
+    const a=path.points[i-1],b=path.points[i],ax=b[0]-a[0],az=b[2]-a[2],radius=path.width/2,margin=radius+2.6;
+    const segment={a,ax,az,length:ax*ax+az*az,radius};
+    for(let z=Math.floor((Math.min(a[2],b[2])-margin)/cellSize);z<=Math.floor((Math.max(a[2],b[2])+margin)/cellSize);z++)
+      for(let x=Math.floor((Math.min(a[0],b[0])-margin)/cellSize);x<=Math.floor((Math.max(a[0],b[0])+margin)/cellSize);x++) {
+        const key=x+','+z;if(!routeCells.has(key))routeCells.set(key,[]);routeCells.get(key).push(segment);
+      }
+  }
   function shoulder(x,z) {
-    let gap=Infinity;
-    for(const {a,b,width} of segments) {
-      const ax=b[0]-a[0],az=b[2]-a[2],length=ax*ax+az*az,t=length?clamp(((x-a[0])*ax+(z-a[2])*az)/length):0;
-      gap=Math.min(gap,Math.hypot(x-a[0]-ax*t,z-a[2]-az*t)-width/2);
+    let gap=2.6;
+    for(const {a,ax,az,length,radius} of routeCells.get(Math.floor(x/cellSize)+','+Math.floor(z/cellSize))??[]) {
+      const t=length?clamp(((x-a[0])*ax+(z-a[2])*az)/length):0;
+      gap=Math.min(gap,Math.hypot(x-a[0]-ax*t,z-a[2]-az*t)-radius);
     }
     return gap;
   }
   // 插值和对角线与地形完全一致; 草丛朝向真实三角面的坡面法线.
-  function surface(x,z) {
+  function surface(x,z,heightOnly=false) {
     const u=clamp((x-x0)/(x1-x0))*(cols-1),v=clamp((z-z0)/(z1-z0))*(rows-1);
     const i=Math.min(cols-2,Math.floor(u)),j=Math.min(rows-2,Math.floor(v)),a=u-i,b=v-j,k=j*cols+i,h=heights;
     const first=a+b<=1,sx=(first?h[k+1]-h[k]:h[k+cols+1]-h[k+cols])/dx,sz=(first?h[k+cols]-h[k]:h[k+cols+1]-h[k+1])/dz;
     const y=first?h[k]+a*(h[k+1]-h[k])+b*(h[k+cols]-h[k]):h[k+cols+1]+(a-1)*(h[k+cols+1]-h[k+cols])+(b-1)*(h[k+cols+1]-h[k+1]);
-    return {y,normal:new T.Vector3(-sx,1,-sz).normalize()};
+    return heightOnly?y:{y,normal:new T.Vector3(-sx,1,-sz).normalize()};
   }
   const patches=[[],[]],spacing=Math.max(.35,o.spacing??.43),limits=[Math.floor(Math.max(0,Math.min(8500,o.maxShort??8500))),Math.floor(Math.max(0,Math.min(400,o.maxTall??400)))];
   for(let z=z0+1;z<z1-1;z+=spacing) for(let x=x0+1;x<x1-1;x+=spacing) {
@@ -43,32 +52,33 @@ FPS.models.mountainGrass = (T, o = {}) => {
     const p=surface(px,pz); if(p.y<2.35||p.normal.y<.8)continue;
     const patch=noise(px/5.7,pz/5.7),detail=noise(px/1.9+17,pz/1.9),density=clamp(.18+patch*.96+detail*.18)*(1-soilWeight(px,pz)*.92);
     if(random()>density)continue;
-    const forest=(o.woodland??[]).some(([cx,cz,r])=>Math.hypot(px-cx,pz-cz)<r*1.35);
-    const tall=gap>.78&&(forest||gap<2.6)&&random()<.12;
+    let forest=0;for(const [cx,cz,r]of o.woodland??[]){const t=clamp((1.35-Math.hypot(px-cx,pz-cz)/r)/.7);forest=Math.max(forest,t*t*(3-2*t));}
+    const tall=random()<(gap>.78?.12*Math.max(clamp((2.6-gap)/1.8),forest):0);
     patches[tall?1:0].push({x:px,z:pz,...p,rank:random(),patch,forest});
   }
   // 超过预算时按随机优先级抽样, 避免按扫描顺序让地图一端缺草.
   patches.forEach((points,i)=>{points.sort((a,b)=>a.rank-b.rank);points.length=Math.min(points.length,limits[i]);});
   if(!patches.some(points=>points.length))return {root};
   function blades(tall) {
-    const positions=[],tints=[],count=tall?5:4,steps=tall?3:2;
+    const positions=[],tints=[],indices=[],shared=new Map(),count=tall?5:4,steps=tall?3:2;
     for(let i=0;i<count;i++) {
       const angle=i*2.4+.25,forward=[Math.sin(angle),Math.cos(angle)],side=[forward[1],-forward[0]],h=.69+(i%3)*.145,lean=.19+(i%3)*.085;
       const at=(t,s)=>{
         const reach=.035+lean*t*t,width=.026*(1-t)+.022*Math.sin(t*Math.PI),twist=t*.52;
         return [forward[0]*reach+side[0]*width*s,h*(t-.12*t*t),forward[1]*reach+side[1]*width*s+twist*forward[0]*width*s];
       };
-      const vertex=(t,s)=>{positions.push(...at(t,s));const tint=.58+.42*t;tints.push(tint,tint,tint);};
+      const vertex=(t,s)=>{const key=i+':'+t+':'+(t===1?0:s);let index=shared.get(key);
+        if(index===undefined){index=positions.length/3;shared.set(key,index);positions.push(...at(t,t===1?0:s));const tint=.58+.42*t;tints.push(tint,tint,tint);}indices.push(index);};
       for(let j=0;j<steps;j++) {
         const a=j/steps,b=(j+1)/steps;
         vertex(a,-1);vertex(a,1);vertex(b,1);
         if(j<steps-1){vertex(a,-1);vertex(b,1);vertex(b,-1);}
       }
     }
-    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('color',new T.Float32BufferAttribute(tints,3));g.computeVertexNormals();return g;
+    const g=new T.BufferGeometry();g.setAttribute('position',new T.Float32BufferAttribute(positions,3));g.setAttribute('color',new T.Float32BufferAttribute(tints,3));g.setIndex(indices);g.computeVertexNormals();return g;
   }
   const time={value:0},material=new T.MeshStandardMaterial({vertexColors:true,roughness:1,side:T.DoubleSide});
-  material.customProgramCacheKey=()=> 'mountain-meadow-v1';
+  material.customProgramCacheKey=()=> 'mountain-meadow-v3';
   material.onBeforeCompile=shader=>{
     shader.uniforms.grassTime=time;
     shader.vertexShader='uniform float grassTime; varying vec3 grassUp;\n'+shader.vertexShader.replace('#include <begin_vertex>',`
@@ -77,7 +87,7 @@ FPS.models.mountainGrass = (T, o = {}) => {
       #ifdef USE_INSTANCING
         grassUp=normalize(normalMatrix*mat3(instanceMatrix)*vec3(0.,1.,0.));
         vec4 base=modelMatrix*instanceMatrix*vec4(0.,0.,0.,1.);
-        float range=length((viewMatrix*base).xyz);
+        float range=length((viewMatrix*base).xyz)+(fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453)*2.-1.)*4.;
         float presence=1.-smoothstep(28.,82.,range);
         float tip=clamp(position.y,0.,1.);
         float phase=dot(base.xz,vec2(.63,.47));
@@ -86,31 +96,37 @@ FPS.models.mountainGrass = (T, o = {}) => {
         transformed*=presence;
       #endif
     `);
-    // 平均法线降低叶片正反面翻转的明暗跳变, 不增加透明排序或细叶投影.
+    // 先抵消双面翻转再向坡面法线混合, 接近垂直时留出浮点容差, 不随观察方向换明暗.
     shader.fragmentShader='varying vec3 grassUp;\n'+shader.fragmentShader.replace('#include <normal_fragment_begin>',
-      '#include <normal_fragment_begin>\nnormal=normalize(mix(normal,normalize(grassUp),.88));');
+      `#include <normal_fragment_begin>
+        vec3 grassNormal=normal*faceDirection, grassDirection=normalize(grassUp);
+        grassNormal*=dot(grassNormal,grassDirection)<-.0001?-1.:1.;
+        normal=normalize(mix(grassNormal,grassDirection,.88));`);
   };
   const pose=new T.Object3D(),up=new T.Vector3(0,1,0),tint=new T.Color();
   patches.forEach((points,kind)=>{
     if(!points.length)return;
-    const mesh=new T.InstancedMesh(blades(kind===1),material,points.length);
+    const mesh=new T.InstancedMesh(blades(kind===1),material,points.length),vertices=mesh.geometry.attributes.position,leafBases=[],base=new T.Vector3();
+    // 叶基只提取一次, 埋深查询只算高度, 不为每株每个叶基创建法线/临时向量.
+    for(let j=0;j<vertices.count;j++)if(vertices.getY(j)===0)leafBases.push(new T.Vector3().fromBufferAttribute(vertices,j));
     points.forEach((p,i)=>{
       pose.position.set(p.x,p.y-.035,p.z);pose.quaternion.setFromUnitVectors(up,p.normal);pose.rotateY(random()*Math.PI*2);
       pose.scale.set(.6+random()*.25,(kind ? .38 : .18)+random()*(kind ? .22 : .14)+p.patch*.035,.6+random()*.25);pose.updateMatrix();
       // 草根跨过相邻网格折线时, 按所有叶基取额外埋深, 不用中心点冒充整株接触.
-      const vertices=mesh.geometry.attributes.position,base=new T.Vector3();let bury=0;
-      for(let j=0;j<vertices.count;j++)if(vertices.getY(j)===0) {
-        base.fromBufferAttribute(vertices,j).applyMatrix4(pose.matrix);
-        bury=Math.max(bury,base.y-surface(base.x,base.z).y+.003);
+      let bury=0;
+      for(const leafBase of leafBases) {
+        base.copy(leafBase).applyMatrix4(pose.matrix);
+        bury=Math.max(bury,base.y-surface(base.x,base.z,true)+.003);
       }
       pose.position.y-=bury;pose.updateMatrix();mesh.setMatrixAt(i,pose.matrix);
       const dry=clamp(noise(p.x/10+7,p.z/10)*.75+(p.y-13)/40),damp=clamp(.65-noise(p.x/15,p.z/15)+.32*Math.exp(-(((p.x+9-p.z*.22)/5)**2)));
-      const shade=clamp(damp*.6+(p.forest ? .08 : 0)),variation=.95+random()*.12;
+      const shade=clamp(damp*.6+p.forest*.08),variation=.95+random()*.12;
       const rgb=colors.fresh.map((v,c)=>((v*(1-dry)+colors.dry[c]*dry)*(1-shade)+colors.shade[c]*shade)*variation/255);
       tint.setRGB(...rgb,T.SRGBColorSpace);mesh.setColorAt(i,tint);
     });
     mesh.name=kind?'mountain-tall-grass':'mountain-meadow-grass';mesh.receiveShadow=true;mesh.raycast=()=>{};
     mesh.computeBoundingBox();mesh.boundingBox.expandByScalar(.035);mesh.computeBoundingSphere();mesh.boundingSphere.radius+=.035;root.add(mesh);
   });
-  return {root,update(dt){time.value+=dt;}};
+  let disposed=false;return {root,update(dt){if(Number.isFinite(dt)&&dt>0)time.value=(time.value+dt)%(Math.PI*200);},
+    dispose(){if(disposed)return;disposed=true;root.children.forEach(mesh=>mesh.dispose());}};
 };

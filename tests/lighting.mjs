@@ -10,10 +10,10 @@ for (const file of ['sun-rays', 'character-shadows']) vm.runInContext(read('mode
 const T = context.THREE, factories = context.FPS.models;
 function renderer({ float = true, counts = [4, 2], maxSamples = 4, width = 1440, height = 900 } = {}) {
   let target = null;
-  const calls = [], compiled = [], gl = { RGBA16F: 1, DEPTH_COMPONENT24: 2, RENDERBUFFER: 3, SAMPLES: 4,
+  const calls = [], compiled = [], initialized = [], gl = { RGBA16F: 1, DEPTH_COMPONENT24: 2, RENDERBUFFER: 3, SAMPLES: 4,
     getInternalformatParameter: (_, format) => new Int32Array(Array.isArray(counts) ? counts : counts[format] ?? []) };
-  return { calls, compiled, dimensions: { width, height }, capabilities: { maxSamples }, extensions: { has: () => float }, shadowMap: { autoUpdate: true }, autoClear: false,
-    getContext: () => gl, getRenderTarget: () => target, setRenderTarget: value => { target = value; },
+  return { calls, compiled, initialized, dimensions: { width, height }, capabilities: { maxSamples }, extensions: { has: () => float }, shadowMap: { autoUpdate: true }, autoClear: false,
+    getContext: () => gl, getRenderTarget: () => target, setRenderTarget: value => { target = value; }, initRenderTarget(value) { initialized.push(value); },
     getDrawingBufferSize(out) { return out.set(this.dimensions.width, this.dimensions.height); }, async compileAsync(scene) { compiled.push(scene.children[0]?.material); },
     render(scene, camera) { calls.push({ scene, camera, target, material: scene.children[0]?.material }); } };
 }
@@ -41,6 +41,7 @@ assert.equal(r.getRenderTarget(), outside);
 assert.equal(r.calls.filter(c => c.scene === f.scene).length, 1, 'AO 不应重绘世界几何');
 assert.equal(r.calls.length, 3, '背光帧只应包含世界/AO/合成, 不绘制光束或独立过滤');
 const world = r.calls[0].target, sample = r.calls[1], composite = r.calls[2];
+assert.equal(r.initialized.length,3);assert(r.initialized.includes(world));
 assert.equal(world.textures.length, 1, '不能重新引入全分辨率间接光附件'); assert.equal(world.samples, 4);
 assert.equal(sample.target.width, 720); assert.equal(sample.target.height, 450);
 assert.equal(sample.target.depthBuffer, false); assert.equal(sample.target.texture.minFilter, T.NearestFilter);
@@ -50,25 +51,32 @@ assert.equal(f.material.onBeforeCompile, originalCompile); assert.equal(f.materi
 for (const material of [sample.material, composite.material]) for (const source of [material.vertexShader, material.fragmentShader]) assert(!expand(source).includes('#include'));
 const resources = new Set([world, sample.target]), materials = new Set([sample.material, composite.material]);
 const handles = r.calls.map(c => c.target); r.calls.length = 0;
+const initialAllocations=r.initialized.length;
 for (let i = 0; i < 12; i++) {
   f.view.position.x += .3; f.view.rotation.y += .01; f.view.updateMatrixWorld(true); effect.render(r, f.scene, f.view);
 }
 assert(r.calls.every(c => handles.includes(c.target)), '移动/转向不能新建缓冲');
 assert.equal(r.calls.filter(c => c.scene === f.scene).length, 12);
+assert.equal(r.initialized.length,initialAllocations,'转向触发了额外缓冲初始化');
 r.dimensions.width = 1920; r.dimensions.height = 1080; r.calls.length = 0; effect.render(r, f.scene, f.view);
+assert.equal(r.initialized.length,initialAllocations+3,'改尺寸后未提前分配光束缓冲');
 assert.equal(r.calls[0].target, world); assert.equal(world.width, 1920); assert.equal(sample.target.width, 960);
 f.view.lookAt(f.view.position.clone().add(new T.Vector3(-32, 48, -21))); f.view.updateMatrixWorld(true);
 r.calls.length = 0; effect.render(r, f.scene, f.view);
 assert.equal(r.calls.length, 4, '迎光帧至多追加一个小光束通道');
 const shafts = r.calls[2].target; resources.add(shafts); materials.add(r.calls[2].material);
+assert(r.initialized.includes(shafts),'光束直到首次迎光才分配缓冲');
 assert(shafts.width <= 512); assert(shafts.width <= world.width / 4);
+const beforePrepare=r.calls.length;
 await effect.prepare(r); assert.equal(r.compiled.length, 3); assert.equal(r.getRenderTarget(), outside);
+assert.equal(r.calls.length,beforePrepare,'后处理准备阶段不应采样尚未生成的世界深度');
 let targetsReleased = 0, materialsReleased = 0;
 for (const target of resources) target.addEventListener('dispose', () => targetsReleased++);
 for (const material of materials) material.addEventListener('dispose', () => materialsReleased++);
 const render = r.render; r.render = () => { throw Error('模拟绘制失败'); };
 assert.throws(() => effect.render(r, f.scene, f.view), /模拟绘制/); assert.equal(r.getRenderTarget(), outside);
-await assert.rejects(effect.prepare(r), /模拟绘制/); assert.equal(r.getRenderTarget(), outside); r.render = render;
+const compileAsync=r.compileAsync;r.compileAsync=async()=>{throw Error('模拟编译失败');};
+await assert.rejects(effect.prepare(r), /模拟编译/); assert.equal(r.getRenderTarget(), outside); r.render = render;r.compileAsync=compileAsync;
 effect.root.visible = false; r.calls.length = 0; effect.render(r, f.scene, f.view);
 assert.equal(r.calls.length, 1); assert.equal(r.calls[0].target, outside);
 effect.dispose(); effect.dispose(); assert.equal(targetsReleased, resources.size); assert.equal(materialsReleased, materials.size);
@@ -83,6 +91,22 @@ for (const [float, counts, maxSamples, expected] of [[false, [4, 2], 4, null], [
   e.dispose();
 }
 console.log('PASS 单颜色/单世界绘制/半分辨率 AO, 光束跳过, MSAA 降级, 缓冲复用释放/状态恢复, 原材质兼容');
+
+// 从未绘制过的缓冲必须在准备阶段按最终尺寸分配, 首次迎光不额外创建目标.
+for(const dimensions of [{width:1440,height:900},{width:1,height:1}]){
+  const cold=renderer(dimensions),effect=factories.sunRays(T),view=fixture();await effect.prepare(cold);
+  assert.equal(cold.initialized.length,3);assert.equal(cold.calls.length,0,'准备阶段读了尚未绘制的世界深度');
+  assert(cold.initialized.some(t=>t.width===dimensions.width&&t.height===dimensions.height));
+  view.view.lookAt(view.view.position.clone().add(new T.Vector3(-32,48,-21)));view.view.updateMatrixWorld(true);effect.render(cold,view.scene,view.view);
+  assert.equal(cold.initialized.length,3,'首次迎光分配了新缓冲');assert.equal(cold.calls.length,4);effect.dispose();
+}
+const allocationFailure=renderer(),failedEffect=factories.sunRays(T),previousTarget=new T.WebGLRenderTarget(8,8);
+allocationFailure.setRenderTarget(previousTarget);allocationFailure.initRenderTarget=target=>{allocationFailure.setRenderTarget(target);throw Error('模拟缓冲分配失败');};
+await assert.rejects(failedEffect.prepare(allocationFailure),/分配失败/);assert.equal(allocationFailure.getRenderTarget(),previousTarget);failedEffect.dispose();previousTarget.dispose();
+const renderFailure=renderer(),renderFailureEffect=factories.sunRays(T),renderFailureView=fixture(),renderFailureTarget=new T.WebGLRenderTarget(8,8);
+renderFailure.setRenderTarget(renderFailureTarget);renderFailure.initRenderTarget=target=>{renderFailure.setRenderTarget(target);throw Error('模拟改尺寸失败');};
+assert.throws(()=>renderFailureEffect.render(renderFailure,renderFailureView.scene,renderFailureView.view),/改尺寸失败/);assert.equal(renderFailure.getRenderTarget(),renderFailureTarget);renderFailureEffect.dispose();renderFailureTarget.dispose();
+console.log('PASS 冷启动/1x1/最终尺寸提前分配, 首次迎光零额外分配, 准备/运行时改尺寸失败恢复原目标');
 
 const receivers = fixture(), shadowRenderer = renderer(), character = factories.characterShadows(T);
 const baseCompile = receivers.material.onBeforeCompile, baseKey = receivers.material.customProgramCacheKey();

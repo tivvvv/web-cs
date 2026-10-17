@@ -18,17 +18,20 @@ FPS.models.mountainTrails = (T, o = {}) => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     const u=x/256*Math.PI*2,v=y/256*Math.PI*2;
     const plank=Math.floor(x/32),knot=Math.exp(-(((x%32)/32-.5)**2/.023+Math.sin((v-1.4-plank*1.7)/2)**2/.022));
-    const value = x % 32 < 1 ? 164 : 226 + Math.sin(u*13+Math.sin(v)*.55+knot*1.8)*10 + Math.sin(u*31+Math.sin(v*2)*.8)*4-knot*18 + (seed / 4294967296 - .5) * 12;
+    let value = x % 32 < 1 ? 164 : 226 + Math.sin(u*13+Math.sin(v)*.55+knot*1.8)*10 + Math.sin(u*31+Math.sin(v*2)*.8)*4-knot*18 + (seed / 4294967296 - .5) * 12;
+    // 齐平钉头与压痕烘焙到原木纹, 每块板两列, 不增加几何/阴影/贴图.
+    const nail=Math.hypot(Math.min(Math.abs(x%32-8),Math.abs(x%32-24)),y%128-32);
+    if(nail<1.65)value=nail<.8?218:112+nail*36;
     woodPixels.data.set([value, value, value - 3, 255], (y * 256 + x) * 4);
   }
   wc.putImageData(woodPixels, 0, 0); const woodMap = new T.CanvasTexture(woodCanvas); woodMap.colorSpace = T.SRGBColorSpace; woodMap.wrapS = woodMap.wrapT = T.RepeatWrapping; woodMap.anisotropy = 8;
-  function add(source, kind) {
+  function add(source, kind,variation=1) {
     const g = source.index ? source.toNonIndexed() : source; if (g !== source) source.dispose();
     const c = new T.Color(kind === 'rail' ? 0x635c48 : kind === 'wood' ? 0x967958 : kind === 'leg' ? 0x596d65 : 0xb8ae98), rgb = [];
     const p = g.attributes.position, n = g.attributes.normal, uv = g.attributes.uv;
     for (let i = 0; i < p.count; i++) {
       const weather=kind==='wood'?.95+.045*Math.sin(p.getX(i)*1.7+p.getZ(i)*.71):1;
-      const shade = (n.getY(i) < -.5 ? .72 : n.getY(i)>.5?1:.93)*weather; rgb.push(c.r * shade, c.g * shade, c.b * shade);
+      const shade = (n.getY(i) < -.5 ? .72 : n.getY(i)>.5?1:.93)*weather*variation; rgb.push(c.r * shade, c.g * shade, c.b * shade);
       const top=Math.abs(n.getY(i))>.5,across=Math.abs(n.getX(i))>.5?p.getZ(i):p.getX(i);
       if (kind === 'wood') uv.setXY(i, top?p.getX(i)/2.2:across/.7, (top?p.getZ(i):p.getY(i))/3);
       else uv.setXY(i, across*(top?.55:.6), (top?p.getZ(i):p.getY(i))*(top?.55:1.8));
@@ -52,7 +55,8 @@ FPS.models.mountainTrails = (T, o = {}) => {
   }
   for (const b of o.boxes ?? []) {
     const kind=b.kind??'stone',g=kind==='stone'||kind==='wood'?bevel(b.size,kind==='stone'?.023:.008):new T.BoxGeometry(...b.size);
-    add(g.translate(...b.offset),kind);
+    const variation=kind==='stone'?.97+.04*(.5+.5*Math.sin(b.offset[0]*1.73+b.offset[2]*.81)):1;
+    add(g.translate(...b.offset),kind,variation);
   }
   // 路基用实体斜裙与坡面相接, 顶面退入踏步; 不叠加共面装饰片.
   for (const f of o.footings ?? []) {
@@ -83,5 +87,5 @@ FPS.models.mountainTrails = (T, o = {}) => {
     }
   }
   parts.forEach((batch, i) => { if (!batch.length) return; const surface = i === 2 ? woodMap : i === 0 ? map : null; const mesh = new T.Mesh(T.mergeGeometries(batch), new T.MeshStandardMaterial({ map: surface, bumpMap: surface, bumpScale: .004, vertexColors: true, roughness: i === 1 ? .65 : .88, metalness: i === 1 ? .38 : 0 })); mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); batch.forEach(g => g.dispose()); });
-  return { root, dispose() { map.dispose(); woodMap.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true; map.dispose(); woodMap.dispose(); } };
 };

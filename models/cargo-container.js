@@ -1,6 +1,6 @@
 // 货运集装箱组, 三网格合批; 六面实体波纹/框架/门锁与箱顶支撑共用场景尺寸.
 FPS.models.cargoContainer = (T, o = {}) => {
-  const root = new T.Group(), parts = [[], [], []], ranges = [[], []], cursors = [0, 0], rayGeometries = [], pose = new T.Object3D();
+  const root = new T.Group(), parts = [[], [], []], ranges = [[], [], []], cursors = [0, 0, 0], rayGeometries = [], pose = new T.Object3D();
   const canvas = document.createElement('canvas'); canvas.width = canvas.height = 512;
   const ctx = canvas.getContext('2d'), pixels = ctx.createImageData(512, 512); let seed = 817;
   const random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 4294967296);
@@ -24,11 +24,9 @@ FPS.models.cargoContainer = (T, o = {}) => {
   function add(source, color, batch = 0, position = [0, 0, 0], rotation = [0, 0, 0]) {
     const g = source.index ? source.toNonIndexed() : source; if (g !== source) source.dispose();
     pose.position.set(...position); pose.rotation.set(...rotation); pose.updateMatrix(); g.applyMatrix4(pose.matrix).applyMatrix4(componentMatrix).applyMatrix4(unitMatrix);
-    if (batch !== 2) {
-      const c = new T.Color(color), p = g.attributes.position, rgb = [];
-      for (let i = 0; i < p.count; i++) { const shade = .91 + .06 * Math.sin(p.getX(i) * .37 + p.getZ(i) * .41); rgb.push(c.r * shade, c.g * shade, c.b * shade); }
-      g.setAttribute('color', new T.Float32BufferAttribute(rgb, 3));
-    }
+    const c = new T.Color(color), p = g.attributes.position, rgb = [];
+    for (let i = 0; i < p.count; i++) { const shade = .91 + .06 * Math.sin(p.getX(i) * .37 + p.getZ(i) * .41); rgb.push(c.r * shade, c.g * shade, c.b * shade); }
+    g.setAttribute('color', new T.Float32BufferAttribute(rgb, 3));
     parts[batch].push(g);
   }
   let unitMatrix = new T.Matrix4(), componentMatrix = new T.Matrix4();
@@ -60,7 +58,13 @@ FPS.models.cargoContainer = (T, o = {}) => {
       }
       for (let j = 0; j < count; j++) { const a = j * 2; index.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
       if ((axis === 'side' && sign < 0) || (axis === 'end' && sign > 0)) for (let i = 0; i < index.length; i += 3) [index[i + 1], index[i + 2]] = [index[i + 2], index[i + 1]];
-      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(positions, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2)); g.setIndex(index); g.computeVertexNormals(); add(g, color);
+      const g = new T.BufferGeometry(); g.setAttribute('position', new T.Float32BufferAttribute(positions, 3)); g.setAttribute('uv', new T.Float32BufferAttribute(uv, 2)); g.setIndex(index); g.computeVertexNormals();
+      const print=[],labelWidth=axis==='side'?Math.min(4.1,l-.7):w*.4;
+      for(let j=0;j<=count;j++)for(const v of [.12,h-.12]){const u=-span/2+span*j/count;
+        print.push(axis==='side'?.5-sign*(u+.2)/labelWidth:.5+sign*(u-sign*w*.24)/labelWidth,
+          axis==='side'?(v-1.075)/1.35:(v-(h-.95))/.28,id%4+(axis==='side'?0:4));
+      }
+      g.setAttribute('cargoPrint',new T.Float32BufferAttribute(print,3));add(g,color,2);
     }
     for (const sign of [-1, 1]) { corrugated('side', sign); if (!openEnds.includes(sign)) corrugated('end', sign); }
     box([w, .07, l], [0, h - .049, 0]);
@@ -104,25 +108,33 @@ FPS.models.cargoContainer = (T, o = {}) => {
       const z = (random() - .5) * (l - .5), height = .08 + random() * .2;
       for (const sign of [-1, 1]) box([.009, height, .045 + random() * .09], [sign * (w / 2 - .014), .14 + height / 2, z], 0x71513a, 1);
     }
-    const slot = id % 4;
-    for (const sign of [-1, 1]) {
-      const g = new T.PlaneGeometry(Math.min(4.1, l - .7), 1.35), uv = g.attributes.uv;
-      for (let i = 0; i < uv.count; i++) uv.setXY(i, (slot % 2 + .015 + uv.getX(i) * .97) / 2, 1 - (Math.floor(slot / 2) + .015 + (1 - uv.getY(i)) * .97) / 2);
-      add(g, 0xffffff, 2, [sign * (w / 2 + .006), 1.75, -.2], [0, sign * Math.PI / 2, 0]);
-    }
-    for (const batch of [0, 1]) {
+    for (const batch of [0, 1, 2]) {
       const count = parts[batch].slice(first[batch]).reduce((sum, g) => sum + g.attributes.position.count, 0);
       ranges[batch].push([cursors[batch], cursors[batch] + count]); cursors[batch] += count;
     }
   }
   const materials = [new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .0018, vertexColors: true, roughness: .7, metalness: .27 }),
-    new T.MeshStandardMaterial({ vertexColors: true, roughness: .68, metalness: .48 }), new T.MeshStandardMaterial({ map: labels, alphaTest: .45, roughness: .81 })];
+    new T.MeshStandardMaterial({ vertexColors: true, roughness: .68, metalness: .48 }), new T.MeshStandardMaterial({map,bumpMap:map,bumpScale:.0018,vertexColors:true,roughness:.7,metalness:.27})];
+  // 印字直接混合到真实波纹面, 小字使用纹理覆盖率, 没有悬空平面/裁切阈值或深度争抢.
+  materials[2].onBeforeCompile=shader=>{
+    shader.uniforms.cargoInk={value:labels};
+    shader.vertexShader='attribute vec3 cargoPrint; varying vec3 vCargoPrint;\n'+shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvCargoPrint=cargoPrint;');
+    shader.fragmentShader='uniform sampler2D cargoInk; varying vec3 vCargoPrint;\n'+shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+      vec2 inkMask=step(vec2(0.),vCargoPrint.xy)*step(vCargoPrint.xy,vec2(1.));
+      vec2 labelUv=clamp(vec2(vCargoPrint.x,1.-vCargoPrint.y),0.,1.);
+      // 箱门复用原图集下部的编号/总重区域, 无新贴图/薄片或额外绘制.
+      float code=step(4.,vCargoPrint.z),slot=mod(vCargoPrint.z,4.);
+      labelUv=mix(labelUv,vec2(.04,.64)+labelUv*vec2(.91,.3),code);
+      vec2 inkUv=(vec2(mod(slot,2.),floor(slot/2.))+.015+labelUv*.97)*.5;
+      inkUv.y=1.-inkUv.y;
+      vec4 ink=texture2D(cargoInk,inkUv);
+      diffuseColor.rgb=mix(diffuseColor.rgb,ink.rgb,ink.a*inkMask.x*inkMask.y);`);
+  };materials[2].customProgramCacheKey=()=> 'cargo-integrated-ink-v2';
   parts.forEach((batch, i) => {
     if (!batch.length) return;
     const mesh = new T.Mesh(T.mergeGeometries(batch), materials[i]); mesh.name = ['cargo-shells', 'cargo-fittings', 'cargo-print'][i];
-    mesh.castShadow = i !== 2; mesh.receiveShadow = true;
-    if (i === 2) mesh.raycast = () => {};
-    else {
+    mesh.castShadow=mesh.receiveShadow=true;
+    {
       mesh.geometry.computeBoundingBox();
       const inverse = new T.Matrix4(), localRay = new T.Raycaster().ray;
       // 绘制仍为整组合批, 射线先逐箱剔除, 仅检测候选箱的原始三角面; 不简化弹痕表面.
@@ -145,5 +157,5 @@ FPS.models.cargoContainer = (T, o = {}) => {
     }
     root.add(mesh); batch.forEach(g => g.dispose());
   });
-  return { root, dispose() { rayGeometries.forEach(g => g.dispose()); map.dispose(); labels.dispose(); } };
+  let disposed=false;return {root,dispose(){if(disposed)return;disposed=true;rayGeometries.forEach(g=>g.dispose());map.dispose();labels.dispose();}};
 };

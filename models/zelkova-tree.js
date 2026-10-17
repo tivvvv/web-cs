@@ -65,7 +65,7 @@ FPS.models.zelkovaTree = (() => {
     const map=leafTexture(canvas);
     const foliageMaterial = new T.MeshStandardMaterial({ map, alphaTest: .42, alphaToCoverage: true, side: T.DoubleSide, roughness: .9 });
     const wind = { value: 0 }, coverage = { value: 1 };
-    foliageMaterial.customProgramCacheKey = () => 'zelkova-foliage-v3';
+    foliageMaterial.customProgramCacheKey = () => 'zelkova-foliage-v5';
     foliageMaterial.onBeforeCompile = shader => {
       shader.uniforms.leafTime = wind; shader.uniforms.leafCoverage = coverage;
       shader.vertexShader = 'uniform float leafTime; varying vec3 canopyNormal;\n' + shader.vertexShader.replace('#include <begin_vertex>', `
@@ -78,11 +78,18 @@ FPS.models.zelkovaTree = (() => {
         #endif
       `);
       // 中心对称的覆盖率过渡保留叶片面积, 避免 MSAA 的默认单侧过渡使树冠变稀.
-      shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `#ifdef USE_ALPHATEST
+      shader.fragmentShader = shader.fragmentShader.replace('#include <alphatest_fragment>', `
+      // 先求导再透明裁切, 保留边缘片元的稳定采样范围.
+      float leafFootprint=max(length(dFdx(vMapUv)),length(dFdy(vMapUv)));
+      #ifdef USE_ALPHATEST
         #ifdef ALPHA_TO_COVERAGE
           if(leafCoverage>.5) {
             float width=max(fwidth(diffuseColor.a),.001);
-            diffuseColor.a=smoothstep(alphaTest-.5*width,alphaTest+.5*width,diffuseColor.a);
+            float covered=smoothstep(alphaTest-.5*width,alphaTest+.5*width,diffuseColor.a);
+            // 亚像素叶面使用 mipmap 的平均覆盖率, 不因固定阈值成片开关.
+            vec2 leafTexels=vec2(textureSize(map,0));
+            float leafPixels=max(length(dFdx(vMapUv)*leafTexels),length(dFdy(vMapUv)*leafTexels));
+            diffuseColor.a=mix(covered,diffuseColor.a,smoothstep(1.,3.,leafPixels));
             if(diffuseColor.a==0.) discard;
           } else {
             if(diffuseColor.a<alphaTest) discard;
@@ -93,8 +100,9 @@ FPS.models.zelkovaTree = (() => {
         #endif
       #endif`);
       shader.fragmentShader = 'uniform float leafCoverage; varying vec3 canopyNormal;\n'+shader.fragmentShader.replace('#include <normal_fragment_begin>', `#include <normal_fragment_begin>
-        float leafFootprint=max(length(dFdx(vMapUv)),length(dFdy(vMapUv)));
-        normal=normalize(mix(normal,normalize(canopyNormal),mix(.65,.95,smoothstep(.1,.4,leafFootprint))));`).replace('#include <lights_fragment_begin>', `
+        vec3 leafNormal=normal*faceDirection, canopyDirection=normalize(canopyNormal);
+        leafNormal*=dot(leafNormal,canopyDirection)<-.0001?-1.:1.;
+        normal=normalize(mix(leafNormal,canopyDirection,mix(.65,.95,smoothstep(.1,.4,leafFootprint))));`).replace('#include <lights_fragment_begin>', `
         #include <lights_fragment_begin>
         #if NUM_DIR_LIGHTS > 0
           float transmission=pow(max(dot(geometryViewDir,-directionalLights[0].direction),0.),3.);
