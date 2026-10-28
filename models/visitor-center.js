@@ -39,6 +39,15 @@ FPS.models.visitorCenter = (T, o = {}) => {
     new T.MeshStandardMaterial({vertexColors:true,metalness:.28,roughness:.63}),
     new T.MeshStandardMaterial({color:0x294d4a,metalness:.22,roughness:.27}),
     new T.MeshStandardMaterial({map:print,roughness:.9}),new T.MeshStandardMaterial({vertexColors:true,metalness:.2,roughness:.78})];
+  // 灰泥的连续低频色差和墙脚吸水带, 不叠贴片, 不把表面颗粒放大成斑点.
+  materials[0].customProgramCacheKey=()=> 'visitor-plaster-finish-v1';
+  materials[0].onBeforeCompile=shader=>{
+    shader.vertexShader='varying vec3 plasterPoint;\n'+shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n plasterPoint=position;');
+    shader.fragmentShader='varying vec3 plasterPoint;\n'+shader.fragmentShader.replace('#include <map_fragment>',`#include <map_fragment>
+      float damp=exp(-max(plasterPoint.y,0.)/.19);
+      float mottling=sin(plasterPoint.x*1.37+plasterPoint.z*.79)*sin(plasterPoint.y*2.1+plasterPoint.z*.42);
+      diffuseColor.rgb*=vec3(1.-damp*.035,1.-damp*.045,1.-damp*.065)*(.992+mottling*.008);`);
+  };
   materials.forEach(m=>m.shadowSide=T.FrontSide);
   function add(source,batch,color=0xffffff) {
     const g=source.index?source.toNonIndexed():source;if(g!==source)source.dispose();

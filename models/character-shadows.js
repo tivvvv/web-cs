@@ -10,16 +10,16 @@ FPS.models.characterShadows = (T, o = {}) => {
   const bounds = new Float32Array(4);
   const uniforms = { characterDepth: { value: target.depthTexture }, characterMatrix: { value: new T.Matrix4() }, characterTexel: { value: 1 / size }, characterEnabled: { value: 0 }, characterBias: { value: bias / (camera.far - camera.near) }, characterBounds: { value: bounds } };
   const patched = new Map(), originalShadows = new Map(), groups = [], receiverRoots = new WeakSet();
-  const playerBody = new T.Group(), bodyGeometry = new T.BoxGeometry(1, 1, 1), legs = [];
+  const playerBody = new T.Group(), bodyGeometry = new T.BoxGeometry(1, 1, 1), legs = [], arms = [], gait = [0,0];
   function part(size, position) {
     const mesh = new T.Mesh(bodyGeometry, depthMaterial); mesh.scale.set(...size); mesh.position.set(...position); playerBody.add(mesh); return mesh;
   }
-  part([.3, .32, .3], [0, 1.58, 0]); part([.46, .57, .27], [0, 1.12, 0]); part([.36, .19, .25], [0, .79, 0]);
+  const head=part([.3, .32, .3], [0, 1.58, 0]), torso=part([.46, .57, .27], [0, 1.12, 0]), hips=part([.36, .19, .25], [0, .79, 0]);
   for (const side of [-1, 1]) {
     legs.push(part([.16, .72, .2], [side * .13, .36, 0]));
-    part([.15, .44, .2], [side * .3, 1.16, -.12]);
+    arms.push(part([.15, .44, .2], [side * .3, 1.16, -.12]));
   }
-  part([.11, .12, .58], [.24, 1.18, -.38]);
+  const gun=part([.11, .12, .58], [.24, 1.18, -.38]);
   let player, signature, phase = 0, previous, elapsed = 0, disposed = false, receiversDirty = false;
   const fragment = `
     uniform sampler2D characterDepth;
@@ -81,6 +81,7 @@ FPS.models.characterShadows = (T, o = {}) => {
     material.addEventListener('dispose', original.remove);
     material.needsUpdate = true;
   }
+  function shown(source){for(let n=source;n;n=n.parent)if(!n.visible)return false;return true;}
   function clearCasters() {
     for (const { mesh } of groups) { casters.remove(mesh); mesh.dispose(); } groups.length = 0;
     for (const [mesh, value] of originalShadows) mesh.castShadow = value; originalShadows.clear();
@@ -116,11 +117,17 @@ FPS.models.characterShadows = (T, o = {}) => {
       const moved = previous ? Math.hypot(position.x - previous.x, position.z - previous.z) : 0, dt = elapsed; elapsed = 0;
       previous ??= new T.Vector3(); previous.copy(position);
       playerBody.position.copy(position); playerBody.rotation.y = view.rotation.y;
+      const crouch=Math.max(0,Math.min(1,(1.75-(player?.body?.height??1.75))/.6));
       if (dt > 0) {
         const distance = Math.min(moved, dt * 9), swing = Math.min(1, distance / dt / 2), blend = 1 - Math.exp(-dt * 14);
         phase = (phase + distance * 2.5) % (Math.PI * 2);
-        for (let i = 0; i < legs.length; i++) legs[i].rotation.x += (Math.sin(phase + i * Math.PI) * .3 * swing - legs[i].rotation.x) * blend;
+        for (let i = 0; i < legs.length; i++) gait[i] += (Math.sin(phase + i * Math.PI) * .3 * swing * (1-crouch*.4) - gait[i]) * blend;
       }
+      // 蹲姿降低躯干/头部并弯腿, 不把整个影子等比压扁; 仍复用原八个实例.
+      head.position.y=1.58-crouch*.6;head.position.z=-crouch*.07;
+      torso.position.y=1.12-crouch*.51;torso.rotation.x=crouch*.2;hips.position.y=.79-crouch*.42;
+      gun.position.y=1.18-crouch*.5;
+      for(let i=0;i<legs.length;i++){legs[i].scale.y=.72-crouch*.28;legs[i].rotation.x=gait[i]+crouch*.5;legs[i].position.y=.36*(1-crouch)+crouch*((.36-crouch*.14)*Math.cos(legs[i].rotation.x)+.1*Math.abs(Math.sin(legs[i].rotation.x)));arms[i].position.y=1.16-crouch*.52;}
       playerBody.updateMatrixWorld(true); for (const actor of actors) actor.updateWorldMatrix(true, true);
       // 动态图连续跟随玩家, 自身投影保持固定像素相位; 静态世界阴影另有独立缓存.
       camera.position.copy(position).addScaledVector(sun, 70); camera.updateMatrixWorld(true);
@@ -128,7 +135,7 @@ FPS.models.characterShadows = (T, o = {}) => {
       bounds[0] = bounds[1] = 1; bounds[2] = bounds[3] = 0;
       for (const { mesh, sources } of groups) {
         let count = 0;
-        for (const { source, player: own } of sources) if (!own || (player && !player.debug && player.health > 0)) {
+        for (const { source, player: own } of sources) if ((!own || (player && !player.debug && player.health > 0)) && shown(source)) {
           mesh.setMatrixAt(count++, source.matrixWorld);
           const sphere = source.geometry.boundingSphere, e = projection.multiplyMatrices(uniforms.characterMatrix.value, source.matrixWorld).elements;
           const rx = sphere.radius * Math.hypot(e[0], e[4], e[8]) + 2 / size, ry = sphere.radius * Math.hypot(e[1], e[5], e[9]) + 2 / size;

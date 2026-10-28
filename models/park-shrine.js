@@ -124,7 +124,7 @@ FPS.models.parkShrine = T => {
   }
   for (const [i, batch] of parts.entries()) if (batch.length) {
     const map = i < 4 ? surfaceMap(i) : undefined;
-    const mesh = new T.Mesh(T.mergeGeometries(batch), new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: i === 2 ? .026 : .012, vertexColors: true, roughness: i === 2 ? .8 : .94 }));
+    const mesh = new T.Mesh(T.mergeGeometries(batch), new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: i === 2 ? .026 : .012, vertexColors: true, roughness: i === 2 ? .8 : i === 0 ? .88 : .94 }));
     mesh.castShadow = mesh.receiveShadow = true; root.add(mesh); batch.forEach(g => g.dispose());
   }
   const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 128;
@@ -135,5 +135,7 @@ FPS.models.parkShrine = T => {
   const board = new T.BoxGeometry(1.34, .74, .1); board.clearGroups(); board.addGroup(0, 30, 0); board.addGroup(30, 6, 1);
   const plaque = new T.Mesh(board, [new T.MeshStandardMaterial({ color: wood, roughness: .94 }), new T.MeshStandardMaterial({ map, roughness: .9 })]);
   plaque.name = 'shrine-plaque'; plaque.position.set(0, 4.3, -4.83); plaque.castShadow = plaque.receiveShadow = true;
-  root.add(plaque); return { root };
+  root.add(plaque);
+  const textures=new Set();root.traverse(n=>{if(n.isMesh)for(const material of [n.material].flat())for(const value of Object.values(material))if(value?.isTexture)textures.add(value);});
+  let disposed=false;return {root,dispose(){if(disposed)return;disposed=true;textures.forEach(texture=>texture.dispose());}};
 };

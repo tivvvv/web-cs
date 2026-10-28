@@ -33,7 +33,7 @@ const document={hidden:false},f=vm.createContext({document});
 vm.runInContext(`
  let clock=0,last=0,time=0,mode='playing',enemiesEnabled=true,hudElapsed=0;
  let cooldown=0,reloadLeft=0,recoil=0,recoilSpeed=0,firing=false,total=0,kills=0,hurt=0,hit=0,toastLeft=0,hurtSource,yaw=0;
- const effects=[],entries=[],player={debug:false},api={flash:{intensity:0}},steps=[];
+ const layout={},effects=[],entries=[],player={debug:false},api={flash:{intensity:0}},steps=[];
  const scene={updateMatrixWorld(){},background:{}},camera={layers:{set(){}}},weapon={root:{visible:true}};
  const info={render:{calls:0,triangles:0},autoReset:true,reset(){this.render.calls=this.render.triangles=0;}};
  const renderer={info,shadowMap:{},clearDepth(){},render(){if(info.autoReset)info.reset();info.render.calls+=2;info.render.triangles+=12;clock+=1;}};

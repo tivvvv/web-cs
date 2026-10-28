@@ -837,6 +837,8 @@
     [[.16,.14,15],[69.22,2.47,27.5],'edging'], [[.16,.14,14],[69.22,2.47,-5],'edging'],
     [[16,.14,.16],[90,2.47,77.62],'edging'], [[14,.14,.16],[146,2.47,59.08],'edging'],
     [[.22,.5,3.5],[57.1,2.05,61.25]], [[2.5,.72,.4],[55,2.16,59.7]],
+    [[3.2,1.3,.5],[111,3.05,64.7]], [[3.2,1.3,.5],[145,3.05,64.7]],
+    [[.5,1.3,2.8],[63.4,3.05,105]], [[.5,1.3,2.8],[63.4,3.05,132]],
     [[3.2,1.15,.26],[35,2.975,60.5]], [[2.8,1.1,.26],[145,2.95,75.9]]
   ].map(([size,p,kind])=>({...box(size,hubPoint(p)),kind}));
   const hubSigns=[{position:hubPoint([54,2.4,96.785]),slot:2,width:2,height:2.25,
@@ -889,7 +891,7 @@
     ...hubRocks.map(r=>[r.position[0]-r.size[0]/2-.25,r.position[2]-r.size[2]/2-.25,r.position[0]+r.size[0]/2+.25,r.position[2]+r.size[2]/2+.25])];
   const hubPlantingExclusions=[...hubGrassExclusions,...hubTrees.map(([x,,z])=>hubRect([x-.52,z-.52,x+.52,z+.52]))];
   place('central-grass','hubGrass',hubRoot,{soil:hubSoil,y:height,turf:hubTurf,paths:hubGround.paths,exclusions:hubGrassExclusions,
-    treeBases:hubGround.treeBases,landforms:hubLandforms,spacing:.36,tallDensity:.34,maxShort:12000,maxTall:800});
+    treeBases:hubGround.treeBases,landforms:hubLandforms,spacing:.355,tallDensity:.34,maxShort:12000,maxTall:800});
   place('central-planting','hubPlanting',hubRoot,{patches:plantingPatches,paths:hubGround.paths,exclusions:hubPlantingExclusions,landforms:hubLandforms,budgets:{shrub:360,flower:42},seed:361});
   regionPlan.center.routes={paths:hubPaths,courtyard:{bounds:[52.5,59.5,57.2,65.5],y:1.8,entries:[[52.3,2.4,61.7],[56.1,2.4,65.6]]},
     terrace:{bounds:[64.5,56.6,67.4,61.6],y:3.6,entries:[[62.3,2.4,59.1],[66,2.4,49.8]]},
@@ -1440,17 +1442,106 @@
     place('coastal-tree-' + i, cherry ? 'sakuraTree' : 'zelkovaTree', [x, level(z) + lift + .08, z], { seed: 701 + i }, [box([.5, 2.9, .5], [0, 1.45, 0])]);
   }
   for (let i = 0; i < 7; i++) place('shore-shrub-' + i, 'coastalFoliage', [12 + i * 3.3, 0, -16.3], { kind: 'shrub', seed: 150 + i });
+  // 导航共用实际道路/台阶/竖梯规格. 相交段切开形成路口, 无额外场景几何或碰撞.
+  const navSegments=[];
+  const navLine=(points,ladder)=>{for(let i=1;i<points.length;i++)navSegments.push({a:points[i-1],b:points[i],ladder,cuts:[0,1]});};
+  hubPaths.forEach(p=>navLine(p.points.map(([x,z])=>[x,height,z])));
+  parkTrails.forEach(p=>navLine(p.points.map(([x,z])=>[x,height+.024+terrainLevel(x,z),z])));
+  navLine([[0,height,29],[0,height,68],[0,height,123]]);
+  navLine([[0,height,123],[-7,height,123],[-7,height,141.5],[3,height,141.5]]);
+
+  for(const p of [...mountainPaths,...mountainLinks])navLine(p.points.map(mountainWorld));
+  mountainStairs.forEach(p=>navLine([p.a,p.b]));
+  navLine([[128,26.4,136],[132,26.4,136],[136,26.4,136],[136,26.4,137.2],[140,26.4,137.2],[140,26.4,136.4]]);
+  navLine([[145.25,19.8,116.6],[145.25,19.8,138.2],[143.6,19.8,138.2]]);
+  navLine([[145.25,19.8,116.6],[145.25,19.8,117.1]]);
+  // 港区地面沿车行通道连接, 箱顶只连接实际踏板, 不跨越箱间空隙.
+  navLine([[70,height,44],[78,height,44],[78,height,58],[78,height,68]]);
+  navLine([[78,height,5],[78,height,44]]);
+  navLine([[78,height,4],[134,height,4],[166.7,height,4],[166.7,height,57],[146,height,57]]);
+  navLine([[78,height,4],[78,height,5]]);
+  navLine([[152,height,4],[152,height,5]]);
+  navLine([[166.7,height,42.8],[163.5,height,42.8],[163.5,height,42]]);
+  navLine([[100,height,36.56],[100,height,40],[93,height,40],[93,height,44],[78,height,44]]);
+  navLine([[159.2,height,12.44],[159.2,height,11],[166.7,height,11]]);
+  navLine([[152,8.4,23],[152,8.4,23.5],[156,8.4,23.5],[159.2,8.4,23.5],[159.2,8.4,13.52]]);
+  navLine([[163.5,8.4,24],[163.5,8.4,23.5],[159.2,8.4,23.5]]);
+  navLine([[78,height,25],[92,height,25],[92,height,14.2],[95,height,14.2],[95,height,15.8]]);
+  navLine([[95,height,14.2],[103.2,height,14.2],[103.2,height,15]]);
+  navLine([[119.7,height,57],[119.7,height,27.6],[122.8,height,27.6],[122.8,height,31]]);
+  navLine([[95,8.4,33.8],[95,8.4,34.9],[97.4,8.4,34.9],[100,8.4,34.9],[100,8.4,30]]);
+  navLine([[103.2,8.4,34],[103.2,8.4,34.6],[101.6,8.4,34.6],[100,8.4,34.6]]);
+  navLine([[103.2,5.4,24],[103.2,5.4,25]]);
+  navLine([[146,2.44,33.5],[146,2.44,34],[137,2.44,34],[137,2.44,35.5]]);
+  navLine([[122.8,5.4,40],[122.8,5.4,47],[137,5.4,47]]);
+  navLine([[146,2.44,34],[155,2.44,34],[155,2.44,35.5]]);
+  navLine([[137,5.4,44],[137,5.4,47],[155,5.4,47],[155,5.4,44]]);
+  navLine([[78,height,57],[146,height,57],[146,height,61.7]]);
+  navLine([[146,height,57],[146,height,54],[146,2.44,50],[146,2.44,35.5]]);
+  navLine([[166.7,height,29],[146,height,29],[146,height,33.5]]);
+  for(const p of stairRoutes)navLine([p.a,p.b]);
+  navLine([[84,.6,-2.8],[124,.6,-2.8],[164,.6,-2.8]]);
+  for(const x of [84,124,164]){navLine([[x,.6,-2.8],[x,.6,-2]]);navLine([[x,height,3.4],[x,height,4]]);}
+  const navLadders=[...regionPlan.corners[3].routes.ladders,...regionPlan.corners[2].routes.ladders];
+  for(const route of navLadders){
+    const foot=route.bottom.map((v,i)=>v+route.normal[i]*.43);
+    for(const p of [foot,route.exit]){let best,bestLine,bestT,distance=6;
+      for(const segment of navSegments){if(segment.ladder)continue;const a=segment.a,b=segment.b,dx=b[0]-a[0],dz=b[2]-a[2],length=dx*dx+dz*dz;if(!length)continue;
+        const t=Math.max(0,Math.min(1,((p[0]-a[0])*dx+(p[2]-a[2])*dz)/length)),q=a.map((v,i)=>v+(b[i]-v)*t),d=Math.hypot(q[0]-p[0],q[2]-p[2]);if(Math.abs(q[1]-p[1])<.1&&d<distance){best=q;bestLine=segment;bestT=t;distance=d;}}
+      if(best){bestLine.cuts.push(bestT);navLine([p,best]);}
+    }navLine([foot,route.exit],route);
+  }
+  // 只连接同高度的真实交点; 桥下道路与高架交叉不会误连.
+  const navBins=new Map(),navPairs=new Set(),navCount=navSegments.length;
+  for(let i=0;i<navCount;i++){const {a,b}=navSegments[i];
+    for(let z=Math.floor(Math.min(a[2],b[2])/12);z<=Math.floor(Math.max(a[2],b[2])/12);z++)for(let x=Math.floor(Math.min(a[0],b[0])/12);x<=Math.floor(Math.max(a[0],b[0])/12);x++){
+      const key=x+','+z;if(!navBins.has(key))navBins.set(key,[]);const bin=navBins.get(key);for(const j of bin)navPairs.add(j*navCount+i);bin.push(i);}}
+  for(const pair of navPairs){const i=Math.floor(pair/navCount),j=pair%navCount;
+    const a=navSegments[i],b=navSegments[j];if(a.ladder||b.ladder)continue;
+    const ax=a.b[0]-a.a[0],az=a.b[2]-a.a[2],bx=b.b[0]-b.a[0],bz=b.b[2]-b.a[2],den=ax*bz-az*bx;
+    if(Math.abs(den)<1.e-8){
+      for(const [line,other]of [[a,b],[b,a]]){const dx=line.b[0]-line.a[0],dz=line.b[2]-line.a[2],length=dx*dx+dz*dz;if(length<1.e-8)continue;
+        for(const p of [other.a,other.b]){const t=((p[0]-line.a[0])*dx+(p[2]-line.a[2])*dz)/length;if(t>0&&t<1&&Math.hypot(line.a[0]+dx*t-p[0],line.a[2]+dz*t-p[2])<.015&&Math.abs(line.a[1]+(line.b[1]-line.a[1])*t-p[1])<.08)line.cuts.push(t);}}
+      continue;
+    }
+    const dx=b.a[0]-a.a[0],dz=b.a[2]-a.a[2],t=(dx*bz-dz*bx)/den,u=(dx*az-dz*ax)/den;
+    if(t>=0&&t<=1&&u>=0&&u<=1&&Math.abs(a.a[1]+(a.b[1]-a.a[1])*t-b.a[1]-(b.b[1]-b.a[1])*u)<.08){a.cuts.push(t);b.cuts.push(u);}
+  }
+  const navigation={nodes:[],edges:[]},nodeKeys=new Map();
+  const navNode=p=>{const key=[Math.round(p[0]*50),Math.round(p[1]*5),Math.round(p[2]*50)].join('/');if(!nodeKeys.has(key)){nodeKeys.set(key,navigation.nodes.length);navigation.nodes.push(p);}return nodeKeys.get(key);};
+  for(const segment of navSegments){const {a,b,ladder}=segment;if(!ladder){const count=Math.ceil(Math.hypot(...b.map((v,i)=>v-a[i]))/6);for(let i=1;i<count;i++)segment.cuts.push(i/count);}
+    const points=[...new Set(segment.cuts)].sort((a,b)=>a-b).map(t=>navNode(a.map((v,i)=>v+(b[i]-v)*t)));
+    for(let i=1;i<points.length;i++)if(points[i]!==points[i-1])navigation.edges.push({a:points[i-1],b:points[i],...(ladder?{ladder}:{})});
+  }
+  const training={groups:{station:[],park:[],center:[],port:[],hill:[]}};
   // 月台出生高度取碰撞顶面; 角色投影由 characterShadows 更新, 不写入环境阴影缓存.
   for (const [i, position] of [[2.6, 0, 7], [-11, .68, 3], [11, 0, 5], [13, 0, -10]].entries()) {
+    training.groups.station.push('coastal-enemy-'+i);
     instances.push({ id: 'coastal-enemy-' + i, model: 'enemy', position,
       collision: { enabled: true, dynamic: true, radius: .42, height: 1.9 },
       options: { speed: 1.8, fireInterval: 1.3 + i * .1, castShadow: false } });
   }
+  for(const [id,area,patrol]of [
+    ['training-park-patrol','park',[[-23,2.424,85],[-30.5,2.424,85],[-32,2.424,94],[-29,2.424,103]]],
+    ['training-center-patrol','center',[[60,2.4,100],[60,2.4,123],[60,2.4,140]]],
+    ['training-port-patrol','port',[[78,2.4,46],[78,2.4,12],[78,2.4,57]]],
+    ['training-port-upper-patrol','port',[[100,8.4,30],[100,8.4,34.9],[95,8.4,34.9]]],
+    ['training-hill-trail-patrol','hill',[mountainWorld(mountainPaths[0].points[0]),mountainWorld(mountainPaths[0].points[Math.floor(mountainPaths[0].points.length/2)]),[140,26.4,136.4]]],
+    ['training-hill-summit-patrol','hill',[[132,26.4,136],[128,26.4,136],[140,26.4,136.4]]]
+  ]){
+    training.groups[area].push(id);instances.push({id,model:'enemy',position:patrol[0],options:{navigation,patrol,speed:1.8,fireInterval:1.55,castShadow:false},collision:{enabled:true,dynamic:true,radius:.32,height:1.9}});
+  }
+  place('coastal-soundscape','coastalSoundscape',[0,0,0],{zones:[
+    {kind:'sea',position:[35,-12],radius:115,volume:.19,phase:.2},
+    {kind:'trees',position:[0,115],radius:64,volume:.13,phase:1.1},
+    {kind:'harbor',position:[139,13],radius:65,volume:.085,phase:2},
+    {kind:'trees',position:[119,120],radius:68,volume:.14,phase:2.6}
+  ]});
   // 主人物沿用原有第一人称手臂和武器, 挂载到相机并复用射击与动画接口.
   instances.push({ id: 'view-rifle', model: 'rifle', attach: 'camera', position: [.3, -.3, -.65], rotation: [0, 0, 0], scale: [1, 1, 1], collision: { enabled: false } });
   window.FPS_LAYOUT = {
     name: '镰仓高校前 · 夏日海岸', mode: 'combat',
-    regionPlan,
+    regionPlan, training,
     catalog: {
       kamakuraGround: 'models/kamakura-ground.js', enodenTrain: 'models/enoden-train.js',
       kamakuraStation: 'models/kamakura-station.js', railwayCrossing: 'models/railway-crossing.js',
@@ -1499,7 +1590,7 @@
       coastalStreet: 'models/coastal-street.js', coastalUtilities: 'models/coastal-utilities.js',
       kamakuraOcean: 'models/kamakura-ocean.js', enoshimaIsland: 'models/enoshima-island.js',
       coastalSky: 'models/coastal-sky.js', coastalFoliage: 'models/coastal-foliage.js',
-      rifle: 'models/rifle.js', enemy: 'models/enemy.js', tracer: 'models/tracer.js', flash: 'models/flash.js',
+      coastalSoundscape: 'models/coastal-soundscape.js', rifle: 'models/rifle.js', enemy: 'models/enemy.js', tracer: 'models/tracer.js', flash: 'models/flash.js',
       impact: 'models/impact.js', bulletmark: 'models/bulletmark.js', lampShards: 'models/lamp-shards.js'
     },
     presentation: {

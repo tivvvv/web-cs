@@ -384,7 +384,7 @@ const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 const tuple = (a, fallback) => a === undefined ? fallback : Array.isArray(a) && a.length === 3 && a.every(Number.isFinite) ? a : (() => { throw Error('必须提供三个有限数值'); })();
 function tell(message) { $('toast').textContent = message; toastLeft = 3; $('toast').style.opacity = 1; }
 function guarded(scope, fn) { try { return fn(); } catch (e) { report(scope, e); } }
-function eye() { return player.position.clone().add(new T.Vector3(0, 1.65, 0)); }
+function eye() { return player.position.clone().add(new T.Vector3(0, (player.body.height ?? 1.75) - .1, 0)); }
 // 仅消退登阶/贴地下阶的视角偏移, 不滤波转向, 水平位移或跳跃轨迹.
 function advanceStepView(dt) {
   // 先消退再限幅, 避免低帧率下连续登阶被提前截断.
@@ -498,6 +498,7 @@ function move(root, dx, dz, radius = .32, height = 1.75, ignore) {
 }
 // 竖直扫掠同时处理地面, 顶部障碍和其他身体, 玩家与敌人共享重力规则.
 function fall(body, dt) {
+  if(body.traversing){const owner=body.traversing.route.owner;if(!owner.disabled&&owner.root.parent)return;body.traversing=null;}
   const p = body.root.position, oldY = p.y;
   const snap = body.grounded && body.vy <= 0 ? STEP_HEIGHT : 0;
   body.vy -= 18 * dt;
@@ -596,6 +597,30 @@ function updateClimbing(dt, x, z, forward, jump) {
   else if (z < 0 && p.y <= route.bottom.y + .001) { body.ladder = null; fall(body, dt); }
   return true;
 }
+// 通用动态身体沿场景竖梯小步移动, 保留头顶/身体阻挡和真实出口, 不传送角色.
+function climbBody(root, specification, direction, dt) {
+  const body=root.userData.actor?.body;if(!body)return 'blocked';
+  const route=ladders.find(r=>!r.owner.disabled&&r.owner.root.parent&&r.bottom.distanceTo(new T.Vector3(...specification.bottom))<.05);
+  if(!route||route.width<body.radius*2+.1){body.traversing=null;return 'blocked';}
+  const p=root.position,start=direction>0?route.line:route.exit;
+  let state=body.traversing;
+  if(!state){if(Math.hypot(p.x-start.x,p.z-start.z)>1.4||Math.abs(p.y-(direction>0?route.bottom.y:route.top.y))>.4)return 'blocked';state=body.traversing={route,phase:0,stalled:0,direction};}
+  if(state.route!==route||state.direction!==direction)return 'blocked';
+  body.vy=0;body.grounded=false;
+  const before=p.clone(),others=physicalBodies(root),align=target=>{
+    const dx=target.x-p.x,dz=target.z-p.z,length=Math.hypot(dx,dz);if(length>.01){const step=Math.min(length,1.8*dt);move(root,dx/length*step,dz/length*step);}
+    return Math.hypot(target.x-p.x,target.z-p.z)<.025;
+  };
+  if(state.phase===0){if(align(route.line))state.phase=1;}
+  else if(state.phase===1){
+    const end=direction>0?route.top.y:route.bottom.y,target=clamp(p.y+direction*1.8*dt,route.bottom.y,route.top.y),count=Math.max(1,Math.ceil(Math.abs(target-p.y)/.06)),dy=(target-p.y)/count;
+    for(let i=0;i<count;i++){const y=p.y;p.y+=dy;if(blockedAt(p,body.radius,body.height,others)){p.y=y;break;}}
+    if(Math.abs(p.y-end)<.01)state.phase=2;
+  } else if(direction<0||align(route.exit)){body.traversing=null;fall(body,dt);return 'done';}
+  state.stalled=p.distanceTo(before)<.001?state.stalled+dt:0;
+  if(state.stalled>2){body.traversing=null;return 'blocked';}
+  root.rotation.y=Math.atan2(-route.normal.x,-route.normal.z);return 'moving';
+}
 // 修复出生点重叠或落地挤入的情况, 分离过程中仍检查墙体和第三个身体.
 function separateBodies() {
   const list = physicalBodies();
@@ -620,9 +645,35 @@ function updateBodyWireframes() {
     a.bodyWire.scale.set(b.radius, b.height, b.radius);
   }
 }
+// 包围体只负责保守剔除, 命中仍取真实三角面; 动态角色不复用静态范围.
+function rayContact(ray, roots, any = false) {
+  const far = ray.far, point = new T.Vector3(), candidates = [];
+  for (const root of new Set(roots)) {
+    const bounds = root.userData.rayBounds;
+    let distance = 0;
+    if (bounds && !root.userData.actor && !bounds.containsPoint(ray.ray.origin)) {
+      if (!ray.ray.intersectBox(bounds, point)) continue;
+      distance = point.distanceTo(ray.ray.origin);
+      if (distance > far) continue;
+    }
+    candidates.push({ root, distance });
+  }
+  candidates.sort((a, b) => a.distance - b.distance);
+  let nearest;
+  try {
+    for (const { root, distance } of candidates) {
+      if (distance > ray.far) break;
+      const hit = ray.intersectObject(root, true).find(h => h.object.isMesh && h.face);
+      if (!hit) continue;
+      if (any) return hit;
+      if (!nearest || hit.distance < nearest.distance) { nearest = hit; ray.far = hit.distance; }
+    }
+    return nearest;
+  } finally { ray.far = far; }
+}
 function visible(from, to) {
   const ray = new T.Raycaster(from, to.clone().sub(from).normalize(), .03, from.distanceTo(to));
-  return !ray.intersectObjects([...new Set(solid.map(s => s.root))], true).some(hit => hit.object.isMesh && hit.face);
+  return !rayContact(ray, solid.map(s => s.root), true);
 }
 function dispose(root) {
   const geometries = new Set(), materials = new Set();
@@ -656,16 +707,27 @@ function effect(name, options) {
   }
 }
 let soundOutput, shotNoise;
+const soundVoices=new Set();
+function noiseBuffer(){
+  if(!shotNoise){shotNoise=audio.createBuffer(1,Math.ceil(audio.sampleRate*.22),audio.sampleRate);const samples=shotNoise.getChannelData(0);let seed=773;for(let i=0;i<samples.length;i++){seed=(Math.imul(seed,1664525)+1013904223)>>>0;samples[i]=seed/4294967296*2-1;}}
+  return shotNoise;
+}
 // 共用包络与输出, 播放结束后断开节点, 连射不会积累音频连接.
-function soundVoice(source, duration, volume, delay = 0, filter) {
+function soundVoice(source, duration, volume, delay = 0, filter, point) {
+  if(soundVoices.size>=24)return;
   const gain = audio.createGain(), t = audio.currentTime + delay;
   gain.gain.setValueAtTime(.0001, t);
   gain.gain.linearRampToValueAtTime(volume, t + .002);
   gain.gain.exponentialRampToValueAtTime(.0001, t + duration);
   if (filter) source.connect(filter).connect(gain); else source.connect(gain);
-  gain.connect(soundOutput);
-  source.onended = () => { source.disconnect(); filter?.disconnect(); gain.disconnect(); };
-  source.start(t); source.stop(t + duration);
+  let panner;
+  if (point && audio.createPanner) {
+    panner=audio.createPanner();panner.panningModel='HRTF';panner.distanceModel='inverse';panner.refDistance=4;panner.maxDistance=140;panner.rolloffFactor=1;
+    panner.positionX.value=point.x;panner.positionY.value=point.y;panner.positionZ.value=point.z;gain.connect(panner).connect(soundOutput);
+  } else gain.connect(soundOutput);
+  source.onended = () => { soundVoices.delete(source);source.disconnect(); filter?.disconnect(); gain.disconnect(); panner?.disconnect(); };
+  soundVoices.add(source);
+  try { source.start(t); source.stop(t + duration); } catch(error) { source.onended(); throw error; }
 }
 function tone(frequency, duration = .08, volume = .035, delay = 0, endFrequency = 45, type = 'triangle') {
   if (muted || audio?.state !== 'running' || !soundOutput) return;
@@ -679,20 +741,37 @@ function gunSound(from, team) {
   if (muted || audio?.state !== 'running' || !soundOutput) return;
   guarded('开枪音效', () => {
     // 缓存程序噪声, 叠加低频冲击形成枪声, 敌方枪声随距离衰减.
-    if (!shotNoise) {
-      shotNoise = audio.createBuffer(1, Math.ceil(audio.sampleRate * .22), audio.sampleRate);
-      const samples = shotNoise.getChannelData(0);
-      for (let i = 0; i < samples.length; i++) samples[i] = Math.random() * 2 - 1;
-    }
-    const own = team === 'player', level = own ? 1 : .65 / (1 + from.distanceTo(eye()) * .12);
+    noiseBuffer();
+    const own = team === 'player', level = own ? 1 : .65;
     const burst = audio.createBufferSource(), filter = audio.createBiquadFilter(), t = audio.currentTime;
     burst.buffer = shotNoise; burst.playbackRate.value = .95 + Math.random() * .1;
     filter.type = 'lowpass'; filter.Q.value = .7;
     filter.frequency.setValueAtTime(own ? 6500 : 3200, t);
     filter.frequency.exponentialRampToValueAtTime(500, t + .16);
-    soundVoice(burst, .18, .38 * level, 0, filter);
-    tone(own ? 155 : 115, .13, .22 * level, 0, 42);
+    soundVoice(burst, .18, .38 * level, 0, filter, own ? undefined : from);
+    if (own) tone(155, .13, .22 * level, 0, 42);
   });
+}
+// 距离触发脚步, 音频节点按寿命回收; 低帧率不连续补放积压脚步.
+function movementSound(dt, landing) {
+  if (muted || !soundOutput) return;
+  const b=player.body,listener=audio.listener;
+  if(listener?.positionX){const p=camera.position,f=new T.Vector3();camera.getWorldDirection(f);listener.positionX.value=p.x;listener.positionY.value=p.y;listener.positionZ.value=p.z;listener.forwardX.value=f.x;listener.forwardY.value=f.y;listener.forwardZ.value=f.z;listener.upX.value=0;listener.upY.value=1;listener.upZ.value=0;}
+  if(player.debug||!b.grounded&&!b.ladder){b.soundDistance=0;return;}
+  b.soundDistance=(b.soundDistance||0)+(b.travelDistance||0);
+  if(b.soundDistance<(b.ladder ? .65 : b.crouched ? 1.05 : 1.4)&&landing<2.5)return;
+  b.soundDistance=0;
+  noiseBuffer();
+  const source=audio.createBufferSource(),filter=audio.createBiquadFilter();source.buffer=shotNoise;
+  const ray=new T.Raycaster(player.position.clone().add(new T.Vector3(0,.15,0)),new T.Vector3(0,-1,0),0,.4),hit=rayContact(ray,solid.map(s=>s.root));
+  const m=hit?.object.material,metal=!!b.ladder||!Array.isArray(m)&&(m?.metalness??0)>.3;
+  filter.type='lowpass';filter.frequency.value=metal?2100:650;source.playbackRate.value=metal?1.5:.68;
+  soundVoice(source,.065,landing>2.5?.13:b.crouched?.025:.065,0,filter);
+}
+function footstepSound(position, metal = false) {
+  if(muted||audio?.state!=='running'||!soundOutput||position.distanceTo(eye())>42)return;
+  const source=audio.createBufferSource(),filter=audio.createBiquadFilter();source.buffer=noiseBuffer();source.playbackRate.value=metal?1.5:.75;
+  filter.type='lowpass';filter.frequency.value=metal?2300:900;soundVoice(source,.065,.08,0,filter,position);
 }
 function defeatSound() {
   // 生命值首次归零时立即开始上行双音, 不等待倒地动画或模型清理.
@@ -726,7 +805,7 @@ function shoot(from, direction, team, damage) {
   const surfaces = entries.filter(e => e.onHit && !e.disabled && !e.body && e.data.attach !== 'camera').map(e => e.root);
   const targets = [...new Set([...solid.map(s => s.root), ...surfaces])].concat(team === 'player' ? actors.filter(a => a.alive && !a.disabled).map(a => a.root) : []);
   // 装饰线的拾取有距离容差, 不能用作弹痕表面; 只接受真实三角面命中.
-  const ray = new T.Raycaster(from, direction, .025, 100), contact = ray.intersectObjects(targets, true).find(hit => hit.object.isMesh && hit.face);
+  const ray = new T.Raycaster(from, direction, .025, 100), contact = rayContact(ray, targets);
   let distance = contact?.distance ?? 100, end = contact ? contact.point.clone() : from.clone().addScaledVector(direction, distance);
   let didHit = !!contact, character = false, bulletmark = true, impact = true;
   let surface;
@@ -741,7 +820,7 @@ function shoot(from, direction, team, damage) {
   }
   if (normal.dot(direction) > 0) normal.negate();
   if (team === 'enemy') {
-    const p = player.position, box = new T.Box3(new T.Vector3(p.x - .32, p.y, p.z - .32), new T.Vector3(p.x + .32, p.y + 1.75, p.z + .32));
+    const p = player.position, box = new T.Box3(new T.Vector3(p.x - .32, p.y, p.z - .32), new T.Vector3(p.x + .32, p.y + player.body.height, p.z + .32));
     const point = ray.ray.intersectBox(box, new T.Vector3());
     if (point && point.distanceTo(from) < distance) {
       end = point; distance = point.distanceTo(from); didHit = character = true;
@@ -775,18 +854,26 @@ function shoot(from, direction, team, damage) {
 function playerFire() {
   if (layout.mode === 'explore' || mode !== 'playing' || cooldown > 0 || reloadLeft > 0 || player.debug) return;
   if (ammo === 0) { reload(); return; }
-  ammo--; cooldown = .115; recoil = Math.min(1.4, recoil + .9); recoilSpeed += 2;
+  const spec = layout.weapon ?? {};
+  ammo--; cooldown = spec.interval ?? .115; recoil = Math.min(1.4, recoil + .9); recoilSpeed += 2;
   // 快速单击可能早于下一帧, 射击前同步最新视角以免使用上一帧的准星方向.
   syncPlayerCamera();
   const direction = new T.Vector3(); camera.getWorldDirection(direction);
-  shoot(camera.position.clone(), direction, 'player', 34);
+  // 首发静止精准; 移动和持续连射扩大锥角, 停火后随时间收敛.
+  const spread = Math.min(.009, player.bloom || 0) + (player.body.moveSpeed || 0) * .0004 + (player.body.grounded === false ? .007 : 0);
+  if (spread > 0) {
+    const phase = (player.shotIndex || 0) * 2.399963, right = new T.Vector3(1,0,0).applyQuaternion(camera.quaternion), up = new T.Vector3(0,1,0).applyQuaternion(camera.quaternion);
+    direction.addScaledVector(right, Math.cos(phase)*spread).addScaledVector(up,Math.sin(phase)*spread).normalize();
+  }
+  player.shotIndex = (player.shotIndex || 0) + 1; player.bloom = Math.min(.009,(player.bloom || 0) + .0012);
+  shoot(camera.position.clone(), direction, 'player', spec.damage ?? 34);
   if (!weapon?.disabled && weapon?.muzzle) {
     effect('flash', { position: weapon.muzzle.getWorldPosition(new T.Vector3()), rotation: camera.quaternion, view: true });
     api.flash.position.copy(weapon.muzzle.getWorldPosition(new T.Vector3())); api.flash.intensity = 3;
   }
   pitch = clamp(pitch + .007, -1.5, 1.5);
 }
-function reload() { if (layout.mode !== 'explore' && mode === 'playing' && ammo < 30 && reloadLeft <= 0) { reloadLeft = 1.65; reloadSound(0); tell('更换弹匣'); } }
+function reload() { if (layout.mode !== 'explore' && mode === 'playing' && ammo < 30 && reloadLeft <= 0) { reloadLeft = layout.weapon?.reloadTime ?? 1.65; reloadSound(0); tell('更换弹匣'); } }
 function createInstance(data, assets) {
   if (!data || typeof data.id !== 'string' || entries.some(e => e.id === data.id)) throw Error('实例 ID 缺失或重复');
   const factory = FPS.models[data.model]; if (typeof factory !== 'function') throw Error('模型不可用: ' + data.model);
@@ -839,10 +926,11 @@ function createInstance(data, assets) {
     if (!n.geometry.boundingSphere) n.geometry.computeBoundingSphere();
     if (n.isInstancedMesh && !n.boundingSphere) n.computeBoundingSphere();
   });
-  root.name = data.id; instance.id = data.id; instance.data = data;
+  root.name = data.id; root.userData.model = data.model; instance.id = data.id; instance.data = data;
   if (body) { body.root = root; body.spawn = root.position.clone(); instance.body = body; }
   if (instance.bodyWire) { instance.bodyWire.visible = false; scene.add(instance.bodyWire); }
   (data.attach === 'camera' ? camera : scene).add(root); root.updateWorldMatrix(true, true);
+  if (!body && !data.attach && !instance.update && (boxes.length || instance.onHit)) root.userData.rayBounds = new T.Box3().setFromObject(root).expandByScalar(.08);
   for (const box of boxes) {
     if (box.heightfield) box.heightfield.inverse = root.matrixWorld.clone().invert();
     solid.push({ root, box: box.applyMatrix4(root.matrixWorld), id: data.id });
@@ -916,7 +1004,14 @@ function syncCollisionWireframes() {
 }
 function updatePlayer(dt) {
   let x = Number(keys.has('KeyD')) - Number(keys.has('KeyA')), z = Number(keys.has('KeyW')) - Number(keys.has('KeyS'));
-  const speed = (keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8 : 4.7) * (player.debug ? 1.7 : 1);
+  const crouch = !player.debug && (keys.has('ControlLeft') || keys.has('ControlRight'));
+  const slow = keys.has('AltLeft') || keys.has('AltRight'), body = player.body, grounded = body.grounded, impactSpeed = body.vy;
+  const desiredHeight = crouch ? 1.15 : 1.75;
+  if (desiredHeight <= body.height || !blockedAt(player.position, body.radius, desiredHeight, physicalBodies(player)))
+    body.height += (desiredHeight - body.height) * (1 - Math.exp(-dt * 18));
+  body.crouched = body.height < 1.7;
+  const speed = (body.crouched && !player.debug ? 2.3 : slow ? 2.5 : keys.has('ShiftLeft') || keys.has('ShiftRight') ? 8 : 4.7) * (player.debug ? 1.7 : 1);
+  const beforeMove = player.position.clone();
   const forward = new T.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)), right = new T.Vector3(Math.cos(yaw), 0, -Math.sin(yaw));
   if (player.debug) camera.getWorldDirection(forward);
   const climbing = !player.debug && updateClimbing(dt, x, z, forward, keys.has('Space'));
@@ -934,6 +1029,9 @@ function updatePlayer(dt) {
       fall(player.body, dt / steps);
     }
   }
+  body.travelDistance=beforeMove.distanceTo(player.position);
+  body.moveSpeed = Math.hypot(player.position.x-beforeMove.x, player.position.z-beforeMove.z) / Math.max(dt,.001);
+  if (typeof audio !== 'undefined' && audio?.state === 'running') movementSound(dt, !grounded && body.grounded ? Math.abs(impactSpeed) : 0);
   advanceStepView(dt); syncPlayerCamera();
   $('climb-help').hidden = player.debug || !(player.body.ladder || player.body.nearLadder);
 }
@@ -968,7 +1066,7 @@ $('sound').onclick = () => {
 document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) pause(); });
 document.addEventListener('keydown', e => {
   if (mode !== 'playing') return;
-  if (['Space', 'KeyB', 'KeyU', 'KeyP'].includes(e.code)) e.preventDefault();
+  if (['Space', 'KeyB', 'KeyU', 'KeyP', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight'].includes(e.code) || (e.ctrlKey || e.altKey) && ['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) e.preventDefault();
   keys.add(e.code); if (e.repeat) return;
   if (e.code === 'KeyR') reload(); if (e.code === 'KeyB') toggleDebug();
   if (e.code === 'KeyU') toggleEnemies();
@@ -1040,7 +1138,7 @@ function frame(stamp) {
   const begin=performance.now(),frameMs=last?Math.max(0,stamp-last):0,dt=Math.min(frameMs/1000,.05);last=stamp;
   renderer.info.autoReset=false;renderer.info.reset();
   if (mode === 'playing') {
-    time += dt; cooldown -= dt;
+    time += dt; cooldown -= dt; player.bloom = (player.bloom || 0) * Math.exp(-dt * 11);
     // 弹簧回正保留每次射击的后坐冲量, 小步积分避免低帧率下动画失稳.
     const recoilSteps = Math.max(1, Math.ceil(dt * 120)), step = dt / recoilSteps;
     for (let i = 0; i < recoilSteps; i++) { recoilSpeed += (-180 * recoil - 22 * recoilSpeed) * step; recoil += recoilSpeed * step; }
@@ -1055,7 +1153,7 @@ function frame(stamp) {
     for (const e of entries) if ((e.update || e.body) && !e.disabled) {
       try {
         if (e.body && e.alive) fall(e.body, dt);
-        e.update?.(dt, e === weapon ? { time, walk, recoil, reload: reloadLeft > 0 ? Math.sin(reloadLeft / 1.65 * Math.PI) : 0 } : api);
+        e.update?.(dt, e === weapon ? { time, walk, recoil, reload: reloadLeft > 0 ? Math.sin(reloadLeft / (layout.weapon?.reloadTime ?? 1.65) * Math.PI) : 0, reloadProgress: reloadLeft > 0 ? 1-reloadLeft/(layout.weapon?.reloadTime ?? 1.65) : 0 } : api);
       }
       catch (error) {
         e.disabled = true; e.root.visible = false; report(e.id + ' 更新', error);
@@ -1169,14 +1267,15 @@ async function boot() {
   if (!lights.length) scene.add(new T.AmbientLight(0xffffff, 2));
   player.position = new T.Vector3(); guarded('玩家出生点', () => player.position.set(...tuple(layout.player?.position, [0, 2, 10])));
   yaw = Number.isFinite(layout.player?.yaw) ? layout.player.yaw : 0; pitch = Number.isFinite(layout.player?.pitch) ? layout.player.pitch : 0;
-  api = { player, eye, move, visible, shoot, effect, spawn: player.position.clone(), flash: new T.PointLight(0xffc572, 0, 4), killed() { kills++; defeatSound(); tell(`敌方单位已清除 · ${kills} / ${total}`); } };
+  api = { player, eye, move, visible, shoot, effect, climb: climbBody, footstep: footstepSound, audio: () => mode === 'playing' && !muted && audio?.state === 'running' ? { context: audio, output: soundOutput, position: player.position, right: [Math.cos(yaw),-Math.sin(yaw)] } : null, spawn: player.position.clone(), flash: new T.PointLight(0xffc572, 0, 4), killed() { kills++; defeatSound(); tell(`敌方单位已清除 · ${kills} / ${total}`); } };
   api.flash.layers.enable(1); scene.add(api.flash);
   const catalog = layout.catalog && typeof layout.catalog === 'object' ? layout.catalog : {};
   await Promise.all(Object.entries(catalog).map(async ([name, path]) => {
     if (typeof path !== 'string' || !/^[\w./-]+\.js$/.test(path) || path.includes('..')) { report(name, '模型路径必须为项目内 JS 文件'); return; }
     if (await load(path) && typeof FPS.models[name] !== 'function') report(path, '脚本未注册模型 ' + name);
   }));
-  const instances = Array.isArray(layout.instances) ? layout.instances : [];
+  const trainingArea=new URLSearchParams(location.search).get('training'),selection=layout.training?.groups?.[trainingArea],trainingIds=Array.isArray(selection)?selection:null;
+  const instances = Array.isArray(layout.instances) ? layout.instances.filter(data=>!trainingIds||data.model!=='enemy'||trainingIds.includes(data.id)) : [];
   if (!Array.isArray(layout.instances)) report('场景布局', 'instances 必须是数组');
   loadingStage('正在生成场景'); await yieldStartup(true);
   const tasks = createStartupTasks(), prepared = instances.map(data => {

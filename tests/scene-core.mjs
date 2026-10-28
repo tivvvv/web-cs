@@ -78,7 +78,7 @@ const reports = [];
 for (const file of ['scene-layout.js', 'scene-kamakura.js']) {
   const f = fixture(file), { t, c, layout, advance, key } = f, T = c.THREE, s = t.snapshot();
   assert.equal(s.entries.length, layout.instances.length); assert.equal(new Set(s.entries.map(e => e.id)).size, s.entries.length);
-  assert.equal(s.actors.length, file === 'scene-layout.js' ? 6 : 4); assert.equal(s.player.debug, false);
+  assert.equal(s.actors.length, layout.instances.filter(i=>i.model==='enemy').length); assert.equal(s.player.debug, false);
   let meshes = 0, triangles = 0;
   s.scene.updateMatrixWorld(true);
   for (const entry of s.entries) entry.root.traverse(mesh => {
@@ -154,6 +154,8 @@ for (const file of ['scene-layout.js', 'scene-kamakura.js']) {
     assert.equal(t.snapshot().effects.filter(e => e.name === 'bulletmark').length, soft ? 0 : 1, id + ' 弹痕软硬规则错误');
   }
   if (file === 'scene-kamakura.js') {
+    // 静态园路检查排除动态巡逻身体; 身体阻挡已在独立用例覆盖.
+    const blockers=t.snapshot().actors.filter(a=>a.alive&&!a.disabled);blockers.forEach(a=>a.disabled=true);
     const ground = t.snapshot().entries.find(e => e.id === 'northwest-park-ground');
     const paths = [...ground.data.options.trails.map(r => r.points),
       [[3, 123], [48, 123]], [[48, 123], [3, 123]], [[46.5, 108], [46.5, 120]],
@@ -208,6 +210,7 @@ for (const file of ['scene-layout.js', 'scene-kamakura.js']) {
       assert(coordinate === 2 ? s.player.position.z > target : s.player.position.x < target, '车站入口/月台台阶受阻');
       assert(Math.abs(s.player.position.y - (coordinate === 2 ? 2.4 : .68)) < .001);
     }
+    blockers.forEach(a=>a.disabled=false);
     console.log('PASS 公园六条园路/拱桥/观景台/参道/枯山水入口, 车站台阶, 长明灯/路灯击碎, 水面中弹');
   }
   t.clearEffects();

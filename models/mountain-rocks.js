@@ -86,8 +86,17 @@ FPS.models.mountainRocks = (T,o={}) => {
       const v=(crack<.035?91:166)+Math.sin(vv*17+Math.sin(u*9)*.4)*9+(seed/4294967296-.5)*17;pixels.data.set([v,v,v-2,255],i*4);
     }
     ctx.putImageData(pixels,0,0);const map=new T.CanvasTexture(canvas);map.wrapS=map.wrapT=T.RepeatWrapping;map.anisotropy=8;
-    const mesh=new T.Mesh(T.mergeGeometries(parts),new T.MeshStandardMaterial({bumpMap:map,bumpScale:.026,vertexColors:true,roughness:1,shadowSide:T.FrontSide}));mesh.name='mountain-outcrop';mesh.castShadow=mesh.receiveShadow=true;root.add(mesh);parts.forEach(g=>g.dispose());
-    return {root,dispose(){map.dispose();}};
+    const mesh=new T.Mesh(T.mergeGeometries(parts),new T.MeshStandardMaterial({bumpMap:map,bumpScale:.026,vertexColors:true,roughness:1,shadowSide:T.FrontSide}));// 三轴高度取样消除岩面投影轴切换处的纹理接缝, 原几何/顶点色/碰撞不变.
+    mesh.material.customProgramCacheKey=()=> 'mountain-rock-grain-v1';
+    mesh.material.onBeforeCompile=shader=>{
+      shader.vertexShader='varying vec3 outcropPoint,outcropNormal;\n'+shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\n outcropPoint=position;outcropNormal=normal;');
+      shader.fragmentShader='varying vec3 outcropPoint,outcropNormal;\n'+shader.fragmentShader.replace('#include <normal_fragment_maps>',`
+        vec3 weights=pow(abs(normalize(outcropNormal)),vec3(4.));weights/=max(dot(weights,vec3(1.)),.001);
+        float rockHeight=(texture2D(bumpMap,outcropPoint.yz/2.2).r*weights.x+texture2D(bumpMap,outcropPoint.xz/2.2).r*weights.y+texture2D(bumpMap,outcropPoint.xy/2.2).r*weights.z)*bumpScale;
+        normal=perturbNormalArb(-vViewPosition,normal,vec2(dFdx(rockHeight),dFdy(rockHeight)),faceDirection);`);
+    };
+    mesh.name='mountain-outcrop';mesh.castShadow=mesh.receiveShadow=true;root.add(mesh);parts.forEach(g=>g.dispose());
+    let disposed=false;return {root,dispose(){if(disposed)return;disposed=true;map.dispose();}};
   }
   return {root};
 };

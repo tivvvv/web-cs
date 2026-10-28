@@ -22,6 +22,7 @@ vm.runInContext(`
  ${html.slice(html.indexOf('const frameStats ='),html.indexOf('const STEP_HEIGHT'))}
  ${html.slice(html.indexOf('const STEP_HEIGHT'),html.indexOf('function separateBodies()'))}
  ${html.slice(html.indexOf('function separateBodies()'),html.indexOf('function updateBodyWireframes()'))}
+ ${html.slice(html.indexOf('function rayContact('),html.indexOf('function dispose(root)'))}
  ${html.slice(html.indexOf('function shoot('),html.indexOf('function reload()'))}
  ${html.slice(html.indexOf('function createInstance('),html.indexOf('function toggleEnemies()'))}
  ${html.slice(html.indexOf('function toggleDebug()'),html.indexOf('function syncCollisionWireframes()'))}
@@ -95,7 +96,7 @@ for(const offset of [-.19,.16]) {
  const direction=t.camera.getWorldDirection(new T.Vector3()),target=new T.Mesh(new T.BoxGeometry(.06,.06,.06),new T.MeshBasicMaterial());
  target.position.copy(t.camera.position).addScaledVector(direction,7);t.scene.add(target);target.updateMatrixWorld(true);t.solid.push({root:target,box:new T.Box3().setFromObject(target)});
  const root=new T.Group(),muzzle=new T.Object3D();muzzle.position.set(.2,-.15,-.8);root.add(muzzle);t.camera.add(root);t.setWeapon({root,muzzle});
- t.events.length=0;t.fireReady();const before=t.stepView.offset;t.playerFire();assert.equal(t.ammo,29);assert.equal(t.stepView.offset,before,'单击消退了缓冲');
+ t.events.length=0;t.player.bloom=0;t.player.body.moveSpeed=0;t.player.body.grounded=true;t.fireReady();const before=t.stepView.offset;t.playerFire();assert.equal(t.ammo,29);assert.equal(t.stepView.offset,before,'单击消退了缓冲');
  const impact=t.events.find(e=>e.name==='bulletmark');assert(impact&&impact.options.parent===target,'平滑后的准星没有命中小靶');
  const screen=impact.options.position.clone().project(t.camera);assert(Math.hypot(screen.x,screen.y)<.006,'命中点偏离准星');
  const flash=t.events.find(e=>e.name==='flash');assert(flash.options.position.distanceTo(muzzle.getWorldPosition(new T.Vector3()))<1e-10,'枪口没有跟随当前相机');

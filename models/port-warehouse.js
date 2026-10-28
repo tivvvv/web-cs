@@ -110,7 +110,7 @@ FPS.models.portWarehouse = (T, o = {}) => {
   const materials = [new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .003, vertexColors: true, roughness: .83, metalness: .12 }),
     new T.MeshStandardMaterial({ map, bumpMap: map, bumpScale: .002, vertexColors: true, roughness: .65, metalness: .35 }),
     new T.MeshStandardMaterial({ vertexColors: true, roughness: .2, metalness: .4 }), new T.MeshStandardMaterial({ map: floorMap, bumpMap: floorMap, bumpScale: .0008, vertexColors: true, roughness: .92 })];
-  materials[0].customProgramCacheKey = () => 'port-warehouse-weather-v2';
+  materials[0].customProgramCacheKey = () => 'port-warehouse-weather-v3';
   materials[0].onBeforeCompile = shader => {
     shader.vertexShader = shader.vertexShader.replace('#include <common>', '#include <common>\n varying vec3 vWarehousePoint;').replace('#include <begin_vertex>', '#include <begin_vertex>\n vWarehousePoint=position;');
     shader.fragmentShader = shader.fragmentShader.replace('#include <common>', '#include <common>\n varying vec3 vWarehousePoint;').replace('#include <map_fragment>', `#include <map_fragment>
@@ -120,6 +120,8 @@ FPS.models.portWarehouse = (T, o = {}) => {
       vec2 filtered=mix(vec2(.132),detail,coverage);
       float seam=max(filtered.x,filtered.y);
       float dirt=exp(-max(0.,vWarehousePoint.y)/.24)*(.08+.13*seam);
+      float runoff=(.5+.5*sin(vWarehousePoint.x*.71+vWarehousePoint.z*.93))*exp(-max(0.,${h.toFixed(3)}-vWarehousePoint.y)/.35)*.025;
+      dirt+=runoff;
       diffuseColor.rgb*=vec3(1.-dirt*.75,1.-dirt,1.-dirt*1.2);`);
   };
   parts.forEach((batch, i) => {
@@ -132,5 +134,5 @@ FPS.models.portWarehouse = (T, o = {}) => {
   for (let i = 0; i < uv.count; i++) if (normals.getZ(i) > -.5) uv.setXY(i, .003, .997);
   const sign = new T.Mesh(signGeometry, new T.MeshStandardMaterial({ map: signMap, roughness: .86 }));
   sign.position.set(0, 5.46, -d / 2 - .12); sign.castShadow = sign.receiveShadow = true; root.add(sign);
-  return { root, dispose() { map.dispose(); signMap.dispose(); floorMap.dispose(); } };
+  let disposed=false;return { root, dispose() { if(disposed)return;disposed=true;map.dispose(); signMap.dispose(); floorMap.dispose(); } };
 };

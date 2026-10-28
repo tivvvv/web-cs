@@ -115,3 +115,17 @@ for(const [sx,sz]of [[0,0],[.3,-.2],[-.3,.2]]) {
 }
 assert(samples>30000&&occluded>300&&uncorrected>30,JSON.stringify({samples,occluded,uncorrected,texels:cache.size}));
 contact.dispose();console.log('PASS 三种坡面/真实身体深度/逐样本接触校准 '+JSON.stringify({samples,uncorrected,occluded}));
+
+// 实际八实例阴影与蹲伏身体高度一致, 头部维持原比例且脚底接地.
+{
+const crouched=fixture();crouched.player.body={height:1.15};const low=crouched.draw(0).scene.children[0],matrix=new T.Matrix4(),box=new T.Box3(),unit=new T.Box3(new T.Vector3(-.5,-.5,-.5),new T.Vector3(.5,.5,.5));
+for(let i=0;i<low.count;i++){low.getMatrixAt(i,matrix);box.union(unit.clone().applyMatrix4(matrix));}
+assert.equal(low.count,8);assert(box.max.y-crouched.player.position.y<1.16,'蹲伏后仍投射站姿影子');assert(Math.abs(box.min.y-crouched.player.position.y)<.015,'蹲姿腿影悬空');low.getMatrixAt(0,matrix);const headScale=new T.Vector3(),headPosition=new T.Vector3(),headRotation=new T.Object3D();matrix.decompose(headPosition,headRotation.quaternion,headScale);assert(Math.abs(headScale.y-.32)<1.e-5,'蹲伏压缩头部比例');crouched.player.body.height=1.75;crouched.draw(0);low.getMatrixAt(0,matrix);assert(Math.abs(matrix.elements[13]-crouched.player.position.y-1.58)<1.e-5);crouched.dispose();
+console.log('PASS 蹲姿阴影高度/弯腿接地/头部比例/站起恢复, 原八实例与缓冲不变');
+}
+
+{
+ const f=fixture(),actor=new T.Group(),hiddenGroup=new T.Group(),g=new T.BoxGeometry(.1,.1,.5),material=new T.MeshStandardMaterial(),gun=new T.Mesh(g,material);hiddenGroup.add(gun);actor.add(hiddenGroup);actor.userData.actor={};f.scene.add(actor);f.draw(0);
+ const proxy=f.calls.at(-1).scene.children.find(n=>n.geometry===g);assert.equal(proxy.count,1);hiddenGroup.visible=false;f.draw(0);assert.equal(proxy.count,0,'隐藏父节点下的武器仍参与角色投影');assert.equal(proxy.visible,false);hiddenGroup.visible=true;f.draw(0);assert.equal(proxy.count,1);assert.equal(f.calls.at(-1).scene.children.find(n=>n.geometry===g),proxy,'显隐重建了角色实例缓冲');f.dispose();g.dispose();material.dispose();
+ console.log('PASS 隐藏武器/父节点不投影, 恢复显隐复用原缓冲');
+}
